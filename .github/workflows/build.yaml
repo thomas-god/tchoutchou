@@ -46,13 +46,13 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: "{{defaultContext}}"
-          file: ./infra/docker/Dockerfile
+          file: ./Dockerfile
 
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            ghcr.io/thomas-god/activities:main
-            ghcr.io/thomas-god/activities:${{ github.sha }}
+            ghcr.io/thomas-god/tchoutchou:main
+            ghcr.io/thomas-god/tchoutchou:${{ github.sha }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new
 
@@ -102,7 +102,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/thomas-god/activities
+          images: ghcr.io/thomas-god/tchoutchou
           flavor: |
             latest=false
           tags: |
@@ -113,8 +113,8 @@ jobs:
         working-directory: ${{ runner.temp }}/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf 'ghcr.io/thomas-god/activities@sha256:%s ' *)
+            $(printf 'ghcr.io/thomas-god/tchoutchou@sha256:%s ' *)
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ghcr.io/thomas-god/activities:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ghcr.io/thomas-god/tchoutchou:${{ steps.meta.outputs.version }}
