@@ -13,8 +13,6 @@
 			journeysPromise = fetchJourneys({ from: from.id, to: to.id, date: new Date() });
 		}
 	});
-
-	$inspect(from, to);
 </script>
 
 <div class="m-3 flex flex-row gap-3 bg-accent p-3 text-accent-content">

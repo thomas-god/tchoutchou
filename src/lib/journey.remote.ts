@@ -1,7 +1,6 @@
-import { VITE_API_KEY } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 import { displayDuration } from '$lib';
 import dayjs from 'dayjs';
-import { fetchRouteDetails } from './route';
 import z from 'zod';
 import { query } from '$app/server';
 
@@ -23,27 +22,22 @@ const schema = z.object({
 	from: z.string(),
 	to: z.string(),
 	date: z.date()
-})
+});
 
-export const fetchJourneys = query(
-	schema,
-	async ({from, to, date}): Promise<Journey[]> => {
-
-		const dateUri = encodeURI(dayjs(date).toISOString());
-		const res = await fetch(
-			`https://api.navitia.io/v1/coverage/sncf/journeys?from=${encodeURI(from)}&to=${encodeURI(to)}&datetime=${dateUri}`,
-			{
-				headers: {
-					Authorization: VITE_API_KEY
-				}
+export const fetchJourneys = query(schema, async ({ from, to, date }): Promise<Journey[]> => {
+	const dateUri = encodeURI(dayjs(date).toISOString());
+	const res = await fetch(
+		`https://api.navitia.io/v1/coverage/sncf/journeys?from=${encodeURI(from)}&to=${encodeURI(to)}&datetime=${dateUri}`,
+		{
+			headers: {
+				Authorization: env.VITE_API_KEY
 			}
-		);
-		const data = await res.json();
-		const journeys: Journey[] = data.journeys.map(extractJourney);
-		// await fetchRouteDetails(journeys[0].sections[0].routeId);
-		return journeys ;
-	}
-);
+		}
+	);
+	const data = await res.json();
+	const journeys: Journey[] = data.journeys.map(extractJourney);
+	return journeys;
+});
 
 const extractJourney = (journey: any): Journey => {
 	const sections = extractSections(journey);
