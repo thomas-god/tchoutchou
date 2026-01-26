@@ -1,8 +1,8 @@
-import { env } from '$env/dynamic/private';
 import { displayDuration } from '$lib';
 import dayjs from 'dayjs';
 import z from 'zod';
 import { query } from '$app/server';
+import { getEnv } from '$lib/env';
 
 export interface Section {
 	duration: string;
@@ -30,7 +30,7 @@ export const fetchJourneys = query(schema, async ({ from, to, date }): Promise<J
 		`https://api.navitia.io/v1/coverage/sncf/journeys?from=${encodeURI(from)}&to=${encodeURI(to)}&datetime=${dateUri}`,
 		{
 			headers: {
-				Authorization: env.VITE_API_KEY
+				Authorization: getEnv('VITE_API_KEY')
 			}
 		}
 	);

@@ -1,5 +1,5 @@
+import { getEnv } from '$lib/env';
 import { query } from '$app/server';
-import { env } from '$env/dynamic/private';
 import * as z from 'zod';
 
 export interface Station {
@@ -14,7 +14,7 @@ export const autocompleteStation = query(z.string(), async (query: string): Prom
 		`https://api.navitia.io/v1/coverage/sncf/pt_objects?type[]=stop_point&q=${query}`,
 		{
 			headers: {
-				Authorization: env.VITE_API_KEY
+				Authorization: getEnv('VITE_API_KEY')
 			}
 		}
 	);
