@@ -1,0 +1,31 @@
+services:
+  tchoutchou:
+    image: ghcr.io/thomas-god/tchoutchou:main
+    labels:
+      - "traefik.enable=true"
+
+      - "traefik.http.services.tchoutchou.loadbalancer.server.port=80"
+      - "traefik.http.routers.tchoutchou.rule=Host(`train.trackforge.fr`)"
+      - "traefik.http.routers.tchoutchou.entrypoints=websecure"
+      - "traefik.http.routers.tchoutchou.tls.certresolver=myresolver"
+
+      - "traefik.docker.network=traefik-public"
+    environment:
+      VITE_API_KEY_FILE: /run/secrets/tchoutchou_api_key
+
+    networks:
+      - traefik-public
+    secrets:
+      - tchoutchou_api_key
+
+    deploy:
+      update_config:
+        order: start-first
+
+secrets:
+  tchoutchou_api_key:
+    external: true
+
+networks:
+  traefik-public:
+    external: true
