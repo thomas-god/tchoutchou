@@ -1,12 +1,16 @@
 import { VITE_API_KEY } from '$env/static/private';
 import { displayDuration } from '$lib';
-import type dayjs from 'dayjs';
+import dayjs from 'dayjs';
+import { fetchRouteDetails } from './route';
+import z from 'zod';
+import { query } from '$app/server';
 
 export interface Section {
 	duration: string;
 	mode: string;
 	from: string;
 	to: string;
+	routeId: string;
 }
 
 export interface Journey {
@@ -15,20 +19,31 @@ export interface Journey {
 	sections: Section[];
 }
 
-export const fetchJourney = async (fromId: string, toId: string, date: dayjs.Dayjs) => {
-	const dateUri = encodeURI(date.toISOString());
-	const res = await fetch(
-		`https://api.navitia.io/v1/coverage/sncf/journeys?from=${encodeURI(fromId)}&to=${encodeURI(toId)}&datetime=${dateUri}`,
-		{
-			headers: {
-				Authorization: VITE_API_KEY
+const schema = z.object({
+	from: z.string(),
+	to: z.string(),
+	date: z.date()
+})
+
+export const fetchJourneys = query(
+	schema,
+	async ({from, to, date}): Promise<Journey[]> => {
+
+		const dateUri = encodeURI(dayjs(date).toISOString());
+		const res = await fetch(
+			`https://api.navitia.io/v1/coverage/sncf/journeys?from=${encodeURI(from)}&to=${encodeURI(to)}&datetime=${dateUri}`,
+			{
+				headers: {
+					Authorization: VITE_API_KEY
+				}
 			}
-		}
-	);
-	const data = await res.json();
-	const journeys: Journey[] = data.journeys.map(extractJourney);
-	return { journeys };
-};
+		);
+		const data = await res.json();
+		const journeys: Journey[] = data.journeys.map(extractJourney);
+		// await fetchRouteDetails(journeys[0].sections[0].routeId);
+		return journeys ;
+	}
+);
 
 const extractJourney = (journey: any): Journey => {
 	const sections = extractSections(journey);
@@ -49,11 +64,13 @@ const extractSections = (journey: any): Section[] => {
 		) {
 			continue;
 		}
+
 		sections.push({
 			duration: displayDuration(section.duration),
 			mode: section.display_informations.physical_mode,
 			from: section.from.name,
-			to: section.to.name
+			to: section.to.name,
+			routeId: section.links.find((elem: any) => elem.type === 'route').id
 		});
 	}
 
