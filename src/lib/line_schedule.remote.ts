@@ -2,7 +2,6 @@ import { query } from '$app/server';
 import { getEnv } from '$lib/env';
 import z from 'zod';
 
-
 export type LineSchedule = Schedule[];
 
 export interface Schedule {
