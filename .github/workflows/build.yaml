@@ -9,7 +9,7 @@ jobs:
   build-docker-image:
     strategy:
       matrix:
-        arch: ["amd64", "arm64"]
+        arch: ['amd64', 'arm64']
         include:
           - arch: amd64
             runs_on: ubuntu-24.04
@@ -39,13 +39,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-
-
       - name: Build and push Docker image
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: "{{defaultContext}}"
+          context: '{{defaultContext}}'
           file: ./Dockerfile
 
           platforms: ${{ matrix.platform }}
