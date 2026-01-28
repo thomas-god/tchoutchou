@@ -1,5 +1,6 @@
 import { query } from '$app/server';
 import { getEnv } from '$lib/env';
+import dayjs from 'dayjs';
 import z from 'zod';
 
 export type LineSchedule = Schedule[];
@@ -18,9 +19,15 @@ export interface ScheduleStop {
 	date_time: string;
 }
 
-export const fetchLineSchedule = query(z.string(), async (line): Promise<LineSchedule> => {
+const schema = z.object({
+	line: z.string(),
+	date: z.date().optional()
+});
+
+export const fetchLineSchedule = query(schema, async ({ line, date }): Promise<LineSchedule> => {
+	const from = date === undefined ? dayjs() : dayjs(date);
 	const res = await fetch(
-		`https://api.navitia.io/v1/coverage/sncf/routes/${line}/route_schedules`,
+		`https://api.navitia.io/v1/coverage/sncf/routes/${line}/route_schedules?from_datetime=${from.format('YYYYMMDDTHHmmss')}`,
 
 		{
 			headers: {
@@ -29,6 +36,10 @@ export const fetchLineSchedule = query(z.string(), async (line): Promise<LineSch
 		}
 	);
 	const data = await res.json();
+
+	if (data.route_schedules.length === 0) {
+		return [];
+	}
 
 	const line_schedule = data.route_schedules[0].table.headers.map((journey: any) => ({
 		id: journey.links.find((link: any) => link.type === 'vehicle_journey').id,

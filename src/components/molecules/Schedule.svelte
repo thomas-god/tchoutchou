@@ -5,7 +5,7 @@
 
 	let { line }: { line: Line } = $props();
 
-	let lineSchedule = $derived(await fetchLineSchedule(line.id));
+	let lineSchedule = $derived(await fetchLineSchedule({ line: line.id }));
 
 	const localeTime = (date: dayjs.Dayjs): string => {
 		return date.format('HH:mm');
@@ -26,5 +26,7 @@
 				{/each}
 			</ul>
 		</div>
+	{:else}
+		<p class="text-warning">Pas de programmation trouvée pour cette ligne</p>
 	{/each}
 </div>
