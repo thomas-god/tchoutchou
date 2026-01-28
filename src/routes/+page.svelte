@@ -2,6 +2,7 @@
 	import { fetchJourneys, type Journey } from '$lib/journey.remote';
 	import { fetchLines } from '$lib/lines.remote';
 	import type { Station } from '$lib/station.remote';
+	import dayjs from 'dayjs';
 	import Lines from '../components/molecules/Lines.svelte';
 	import Schedule from '../components/molecules/Schedule.svelte';
 	import StationSelect from '../components/molecules/StationSelect.svelte';
@@ -13,6 +14,8 @@
 
 	let lines = await fetchLines();
 	let selectedLine = $state(undefined);
+	let rawDate = $state(undefined);
+	let fromDate = $derived(dayjs(rawDate).toDate());
 
 	$effect(() => {
 		if (from !== undefined && to !== undefined) {
@@ -45,9 +48,11 @@
 	{/await}
 {/if}
 
-<div class="m-3 flex flex-col gap-3 p-3">
-	<Lines {lines} bind:selectedLine />
+<div class="m-3 flex flex-col gap-3 bg-base-300 p-3">
+	<div class="flex flex-row items-end gap-3">
+		<Lines {lines} bind:selectedLine bind:from={rawDate} />
+	</div>
 	{#if selectedLine !== undefined}
-		<Schedule line={selectedLine} />
+		<Schedule line={selectedLine} from={fromDate} />
 	{/if}
 </div>

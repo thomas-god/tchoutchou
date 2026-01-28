@@ -21,13 +21,13 @@ export interface ScheduleStop {
 
 const schema = z.object({
 	line: z.string(),
-	date: z.date().optional()
+	from: z.date().optional()
 });
 
-export const fetchLineSchedule = query(schema, async ({ line, date }): Promise<LineSchedule> => {
-	const from = date === undefined ? dayjs() : dayjs(date);
+export const fetchLineSchedule = query(schema, async ({ line, from }): Promise<LineSchedule> => {
+	const fromDate = from === undefined ? dayjs() : dayjs(from);
 	const res = await fetch(
-		`https://api.navitia.io/v1/coverage/sncf/routes/${line}/route_schedules?from_datetime=${from.format('YYYYMMDDTHHmmss')}`,
+		`https://api.navitia.io/v1/coverage/sncf/routes/${line}/route_schedules?from_datetime=${fromDate.format('YYYYMMDDTHHmmss')}`,
 
 		{
 			headers: {

@@ -3,9 +3,9 @@
 	import type { Line } from '$lib/lines.remote';
 	import dayjs from 'dayjs';
 
-	let { line }: { line: Line } = $props();
+	let { line, from }: { line: Line; from?: Date } = $props();
 
-	let lineSchedule = $derived(await fetchLineSchedule({ line: line.id }));
+	let lineSchedule = $derived(await fetchLineSchedule({ line: line.id, from }));
 
 	const localeTime = (date: dayjs.Dayjs): string => {
 		return date.format('HH:mm');
