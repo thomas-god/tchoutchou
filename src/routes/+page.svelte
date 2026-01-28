@@ -14,7 +14,7 @@
 
 	let lines = await fetchLines();
 	let selectedLine = $state(undefined);
-	let rawDate = $state(undefined);
+	let rawDate = $state(dayjs().format('YYYY-MM-DD'));
 	let fromDate = $derived(dayjs(rawDate).toDate());
 
 	$effect(() => {

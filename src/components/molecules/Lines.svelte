@@ -14,7 +14,7 @@
 		<legend class="fieldset-legend">Programmation</legend>
 		<label for="select-line">Lignes </label>
 		<select class="select" id="select-line" bind:value={selectedLine}>
-			<option disabled selected>Sélectionner une ligne de train</option>
+			<option disabled selected value={undefined}>Sélectionner une ligne de train</option>
 			{#each lines as line (line.id)}
 				<option value={line}>
 					{line.name}
