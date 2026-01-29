@@ -19,7 +19,7 @@
 </script>
 
 <div class="flex flex-col">
-	<label>
+	<label class="flex flex-row items-center gap-3">
 		<span>{label}</span>
 		<input
 			type="text"
