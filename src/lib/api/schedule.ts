@@ -1,5 +1,5 @@
-import { query } from '$app/server';
 import { getEnv } from '$lib/env';
+import { getDb } from '$lib/server/db';
 import dayjs from 'dayjs';
 import z from 'zod';
 
@@ -19,6 +19,38 @@ export interface ScheduleStop {
 	name: string;
 	date_time: string;
 }
+
+export const persistLineSchedules = async (date: dayjs.Dayjs) => {
+	const db = getDb();
+
+	const n_schedules = (
+		db
+			.prepare('SELECT COUNT(*) as count FROM t_schedules WHERE date = ?')
+			.get(date.format('YYYYMMDD')) as { count: number }
+	).count;
+
+	if (n_schedules === 0) {
+		console.log(`Loading schedules for ${date.format('YYYY-MM-DD')}`);
+		const lines = db.prepare('SELECT id FROM t_lines ORDER BY NAME;').all() as {
+			id: string;
+		}[];
+
+		for (const line of lines) {
+			const schedules = await fetchLineSchedule({ line: line.id, from: date.toDate() });
+			for (const schedule of schedules) {
+				db.prepare(
+					'INSERT INTO t_schedules (id, route, direction, headsign, date) VALUES (?, ?, ?, ?, ?)'
+				).run(schedule.id, schedule.route, schedule.direction, schedule.headsign, schedule.date);
+				for (const stop of schedule.stops) {
+					db.prepare(
+						'INSERT INTO t_stops (id, schedule_id, name, datetime) VALUES (?, ?, ?, ?);'
+					).run(stop.id, schedule.id, stop.name, stop.date_time);
+				}
+				console.log(`Inserted schedule ${schedule.id}`);
+			}
+		}
+	}
+};
 
 export const schema = z.object({
 	line: z.string(),
