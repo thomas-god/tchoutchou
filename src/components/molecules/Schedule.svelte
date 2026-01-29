@@ -1,12 +1,12 @@
 <script lang="ts">
 	import type { Line } from '$lib/api/lines';
-	import { fetchLineSchedule } from '$lib/line_schedule.remote';
+	import { fetchLineScheduleQuery } from '$lib/line_schedule.remote';
 	import dayjs from 'dayjs';
 	import { fade } from 'svelte/transition';
 
 	let { line, from }: { line: Line; from?: Date } = $props();
 
-	let lineSchedulePromise = $derived(fetchLineSchedule({ line: line.id, from }));
+	let lineSchedulePromise = $derived(fetchLineScheduleQuery({ line: line.id, from }));
 
 	const localeTime = (date: dayjs.Dayjs): string => {
 		return date.format('HH:mm');
