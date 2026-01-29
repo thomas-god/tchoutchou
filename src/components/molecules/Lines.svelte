@@ -7,6 +7,9 @@
 		selectedLine = $bindable(),
 		from = $bindable()
 	}: { lines: Line[]; selectedLine: Line | undefined; from: string | undefined } = $props();
+	const today = dayjs();
+	const nextWeek = today.add(1, 'week');
+	const format = (d: dayjs.Dayjs) => d.format('YYYY-MM-DD');
 </script>
 
 <div class="flex flex-col gap-2">
@@ -28,7 +31,8 @@
 			class="input"
 			id="select-from-date"
 			bind:value={from}
-			min={dayjs().format('YYYY-MM-DD')}
+			min={format(today)}
+			max={format(nextWeek)}
 		/>
 	</fieldset>
 </div>
