@@ -12,11 +12,15 @@ services:
       - 'traefik.docker.network=traefik-public'
     environment:
       VITE_API_KEY_FILE: /run/secrets/tchoutchou_api_key
+      VITE_DATABASE_PATH: /data/tchoutchou.db
 
     networks:
       - traefik-public
     secrets:
       - tchoutchou_api_key
+
+    volumes:
+      - tchoutchou_data:/data
 
     deploy:
       update_config:
@@ -29,3 +33,6 @@ secrets:
 networks:
   traefik-public:
     external: true
+
+volumes:
+  tchoutchou_data:
