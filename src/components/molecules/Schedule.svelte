@@ -1,7 +1,8 @@
 <script lang="ts">
+	import type { Line } from '$lib/api/lines';
 	import { fetchLineSchedule } from '$lib/line_schedule.remote';
-	import type { Line } from '$lib/lines.remote';
 	import dayjs from 'dayjs';
+	import { fade } from 'svelte/transition';
 
 	let { line, from }: { line: Line; from?: Date } = $props();
 
@@ -13,9 +14,11 @@
 </script>
 
 <div class="flex flex-col">
-	{#await lineSchedulePromise then lineSchedule}
+	{#await lineSchedulePromise}
+		<span class="loading loading-xl self-center loading-dots pt-3"></span>
+	{:then lineSchedule}
 		{#each lineSchedule as schedule (schedule.id)}
-			<div class="p-2">
+			<div class="p-2" in:fade|global out:fade|global={{ duration: 50 }}>
 				<h3 class="text-lg font-semibold">{schedule.route}</h3>
 				<p class="italic">
 					TGV <span class="font-semibold">{schedule.headsign}</span>, direction: {schedule.direction}
