@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Line } from '$lib/lines.remote';
+	import type { Line } from '$lib/api/lines';
 	import dayjs from 'dayjs';
 
 	let {

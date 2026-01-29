@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { fetchJourneys, type Journey } from '$lib/journey.remote';
-	import { fetchLines } from '$lib/lines.remote';
+	import { fetchLinesQuery } from '$lib/lines.remote';
 	import type { Station } from '$lib/station.remote';
 	import dayjs from 'dayjs';
 	import Lines from '../components/molecules/Lines.svelte';
@@ -12,7 +12,7 @@
 
 	let journeysPromise: Promise<Journey[]> | undefined = $state(undefined);
 
-	let lines = await fetchLines();
+	let lines = await fetchLinesQuery();
 	let selectedLine = $state(undefined);
 	let rawDate = $state(dayjs().format('YYYY-MM-DD'));
 	let fromDate = $derived(dayjs(rawDate).toDate());
