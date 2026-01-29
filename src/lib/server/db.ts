@@ -16,4 +16,8 @@ export const getDb = () => {
 	return _db;
 };
 
-export const initDB = (db: DatabaseSync) => {};
+export const initDB = (db: DatabaseSync) => {
+	db.exec(
+		'CREATE TABLE IF NOT EXISTS t_lines (id TEXT UNIQUE PRIMARY KEY, name TEXT, direction TEXT);'
+	);
+};
