@@ -61,7 +61,3 @@
 </script>
 
 <div class="h-svh w-full" bind:this={mapElement}></div>
-
-<style>
-	@import 'leaflet/dist/leaflet.css';
-</style>
