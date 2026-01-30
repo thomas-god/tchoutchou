@@ -17,6 +17,8 @@ export interface Schedule {
 export interface ScheduleStop {
 	id: string;
 	name: string;
+	lat: number;
+	lon: number;
 	date_time: string;
 }
 
@@ -43,8 +45,10 @@ export const persistLineSchedules = async (date: dayjs.Dayjs) => {
 				).run(schedule.id, schedule.route, schedule.direction, schedule.headsign, schedule.date);
 				for (const stop of schedule.stops) {
 					db.prepare(
-						'INSERT INTO t_stops (id, schedule_id, name, datetime) VALUES (?, ?, ?, ?);'
-					).run(stop.id, schedule.id, stop.name, stop.date_time);
+						`INSERT INTO t_stops
+							(id, schedule_id, name, lat, lon, datetime)
+							VALUES (?, ?, ?, ?, ?, ?);`
+					).run(stop.id, schedule.id, stop.name, stop.lat, stop.lon, stop.date_time);
 				}
 				console.log(`Inserted schedule ${schedule.id}`);
 			}
@@ -90,6 +94,8 @@ export const fetchLineSchedule = async ({ line, from }: Schema): Promise<LineSch
 				line_schedule[journey_index].stops.push({
 					id: stop.stop_point.id,
 					name: stop.stop_point.name,
+					lat: stop.stop_point.coord.lat,
+					lon: stop.stop_point.coord.lon,
 					date_time: date_time.date_time
 				});
 			}

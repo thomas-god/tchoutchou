@@ -41,6 +41,8 @@ export const initDB = (db: DatabaseSync) => {
 			id TEXT,
 			schedule_id TEXT,
 			name TEXT,
+			lat REAL,
+			lon REAL,
 			datetime TEXT,
 			FOREIGN KEY(schedule_id) REFERENCES t_schedules(id)
 		);

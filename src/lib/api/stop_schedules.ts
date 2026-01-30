@@ -32,7 +32,9 @@ export const fetchStopSchedules = async ({
             json_object(
               'id', s.id,
               'datetime', s.datetime,
-              'name', s.name
+              'name', s.name,
+							'lon', s.lon,
+							'lat', s.lat
             )
           ) FILTER (WHERE s.datetime >= t_stops.datetime) AS stops
         FROM t_stops
@@ -58,6 +60,8 @@ export const fetchStopSchedules = async ({
 				.map((stop) => ({
 					id: stop.id,
 					name: stop.name,
+					lon: stop.lon,
+					lat: stop.lat,
 					date_time: stop.datetime
 				}))
 				.toSorted((a, b) => (a.date_time > b.date_time ? 1 : -1))
