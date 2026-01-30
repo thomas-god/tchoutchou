@@ -1,5 +1,4 @@
 <script lang="ts">
-	import type { Line } from '$lib/api/lines';
 	import dayjs from 'dayjs';
 	import { fade } from 'svelte/transition';
 	import StationSelect from './StationSelect.svelte';
@@ -21,10 +20,6 @@
 
 		return fetchStopSchedulesQuery({ stop: stop.id, from });
 	});
-
-	const localeTime = (date: dayjs.Dayjs): string => {
-		return date.format('HH:mm');
-	};
 </script>
 
 <div class="flex flex-col gap-3 bg-base-300 p-3">
@@ -45,26 +40,22 @@
 		</div>
 	</fieldset>
 
-	{#await promise}
-		<span class="loading loading-xl self-center loading-dots pt-3"></span>
-	{:then destinations}
-		{#each destinations as destination (destination.stop.id)}
-			<div class="p-2" in:fade|global out:fade|global={{ duration: 50 }}>
-				<h3 class="text-lg font-semibold">{destination.stop.name}</h3>
-				<p class="italic">
-					TGV <span class="font-semibold">{destination.schedule.headsign}</span>, {displayDuration(
-						destination.duration
-					)}
-				</p>
-				<!-- <p>Arrets</p>
-				<ul class="ml-2">
-					{#each destination.stops as stop}
-						<li>{stop.name}: {localeTime(dayjs(stop.date_time))}</li>
-					{/each}
-				</ul> -->
-			</div>
-		{:else}
-			<p class="text-warning">Pas de destination trouvée pour cette gare</p>
-		{/each}
-	{/await}
+	{#if promise !== undefined}
+		{#await promise}
+			<span class="loading loading-xl self-center loading-dots pt-3"></span>
+		{:then destinations}
+			{#each destinations as destination (destination.stop.id)}
+				<div class="p-2" in:fade|global out:fade|global={{ duration: 50 }}>
+					<h3 class="text-lg font-semibold">{destination.stop.name}</h3>
+					<p class="italic">
+						TGV <span class="font-semibold">{destination.schedule.headsign}</span>, {displayDuration(
+							destination.duration
+						)}
+					</p>
+				</div>
+			{:else}
+				<p class="text-warning">Pas de destination trouvée pour cette gare</p>
+			{/each}
+		{/await}
+	{/if}
 </div>
