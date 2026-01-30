@@ -38,12 +38,14 @@
 			map.setView([origin.lat, origin.lon], 13);
 		}
 
-		const icon = leaflet.icon({
-			iconUrl: 'src/static/station.svg',
-			iconSize: [30, 30]
-		});
-
 		for (const destination of destinations) {
+			const icon = leaflet.divIcon({
+				html: `
+      <div>
+        <img src="/icons/station.svg" alt="Train station" class="w-8 h-8"/>
+      </div>
+      `
+			});
 			leaflet
 				.marker([destination.stop.lat, destination.stop.lon], { icon })
 				.addTo(map)
