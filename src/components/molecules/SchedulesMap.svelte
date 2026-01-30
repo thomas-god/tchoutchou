@@ -41,9 +41,7 @@
 		for (const destination of destinations) {
 			const icon = leaflet.divIcon({
 				html: `
-      <div>
         <img src="/icons/station.svg" alt="Train station" class="w-8 h-8"/>
-      </div>
       `
 			});
 			leaflet
@@ -51,6 +49,13 @@
 				.addTo(map)
 				.bindPopup(`${destination.stop.name} (${displayDuration(destination.duration)})`);
 		}
+
+		const startIcon = leaflet.divIcon({
+			html: `
+        <img src="/icons/city.svg" alt="City" class="w-12 h-12 z-10"/>
+      `
+		});
+		leaflet.marker([origin.lat, origin.lon], { icon: startIcon }).addTo(map);
 
 		leaflet
 			.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
