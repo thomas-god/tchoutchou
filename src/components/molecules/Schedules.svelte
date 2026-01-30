@@ -5,6 +5,7 @@
 	import { fetchStopSchedulesQuery } from '$lib/stop_schedules.remote';
 	import type { Station } from '$lib/station.remote';
 	import { displayDuration } from '$lib';
+	import SchedulesMap from './SchedulesMap.svelte';
 
 	const today = dayjs();
 	const nextWeek = today.add(1, 'week');
@@ -44,18 +45,25 @@
 		{#await promise}
 			<span class="loading loading-xl self-center loading-dots pt-3"></span>
 		{:then destinations}
-			{#each destinations as destination (destination.stop.id)}
-				<div class="p-2" in:fade|global out:fade|global={{ duration: 50 }}>
-					<h3 class="text-lg font-semibold">{destination.stop.name}</h3>
-					<p class="italic">
-						TGV <span class="font-semibold">{destination.schedule.headsign}</span>, {displayDuration(
-							destination.duration
-						)}
-					</p>
+			<div class="flex flex-row">
+				<div>
+					{#each destinations as destination (destination.stop.id)}
+						<div class="p-2" in:fade|global out:fade|global={{ duration: 50 }}>
+							<h3 class="text-lg font-semibold">{destination.stop.name}</h3>
+							<p class="italic">
+								TGV <span class="font-semibold">{destination.schedule.headsign}</span>, {displayDuration(
+									destination.duration
+								)}
+							</p>
+						</div>
+					{:else}
+						<p class="text-warning">Pas de destination trouvée pour cette gare</p>
+					{/each}
 				</div>
-			{:else}
-				<p class="text-warning">Pas de destination trouvée pour cette gare</p>
-			{/each}
+				<div class="grow p-3">
+					<SchedulesMap origin={{ lat: stop!.lat, lon: stop!.lon }} {destinations} />
+				</div>
+			</div>
 		{/await}
 	{/if}
 </div>
