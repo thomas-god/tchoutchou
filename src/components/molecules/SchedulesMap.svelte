@@ -28,6 +28,7 @@
 		leaflet = await import('leaflet');
 
 		map = leaflet.map(mapElement);
+
 		if (destinations.length > 0) {
 			map.fitBounds([
 				[minLat - deltaLat, minLon - deltaLon],
@@ -37,9 +38,14 @@
 			map.setView([origin.lat, origin.lon], 13);
 		}
 
+		const icon = leaflet.icon({
+			iconUrl: 'src/static/station.svg',
+			iconSize: [30, 30]
+		});
+
 		for (const destination of destinations) {
 			leaflet
-				.marker([destination.stop.lat, destination.stop.lon])
+				.marker([destination.stop.lat, destination.stop.lon], { icon })
 				.addTo(map)
 				.bindPopup(`${destination.stop.name} (${displayDuration(destination.duration)})`);
 		}
