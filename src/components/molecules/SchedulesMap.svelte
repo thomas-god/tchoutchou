@@ -21,7 +21,7 @@
 
 	const icon = leaflet.divIcon({
 		html: `
-			  <img src="/icons/station.svg" alt="Train station" class="w-8 h-8"/>
+			  <img src="/icons/station.svg" alt="Train station" class="w-3.5 h-3.5"/>
 			`
 	});
 	let markersLayer = new leaflet.LayerGroup();
@@ -72,7 +72,7 @@
 
 		const startIcon = leaflet.divIcon({
 			html: `
-		    <img src="/icons/city.svg" alt="City" class="w-12 h-12 z-10"/>
+		    <img src="/icons/city.svg" alt="City" class="w-6 h-6 z-10"/>
 		  `
 		});
 		markersLayer.addLayer(
