@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { displayDuration } from '$lib';
 	import type { Destination } from '$lib/api/stop_schedules';
-	import { onMount, onDestroy } from 'svelte';
+	import { onDestroy } from 'svelte';
+	import leaflet from 'leaflet';
 
 	interface Props {
 		origin: {
@@ -9,23 +10,29 @@
 			lon: number;
 		};
 		destinations: Destination[];
+		bounds: { lat: { min: number; max: number }; lon: { min: number; max: number } };
 		selectedDestination: undefined | Destination;
 	}
 
-	let { origin, destinations, selectedDestination }: Props = $props();
+	let { origin, destinations, selectedDestination, bounds }: Props = $props();
 
 	let mapElement: HTMLDivElement;
-	let map: any;
-	let leaflet: any;
+	let map: any = $state(undefined);
 
-	let minLat = $derived(Math.min(...destinations.map((destination) => destination.stop.lat)));
-	let maxLat = $derived(Math.max(...destinations.map((destination) => destination.stop.lat)));
-	let minLon = $derived(Math.min(...destinations.map((destination) => destination.stop.lon)));
-	let maxLon = $derived(Math.max(...destinations.map((destination) => destination.stop.lon)));
-	let deltaLat = $derived((maxLat - minLat) * 0.001);
-	let deltaLon = $derived((maxLon - minLon) * 0.001);
-
-	let markers: any[] = $state([]);
+	const icon = leaflet.divIcon({
+		html: `
+			  <img src="/icons/station.svg" alt="Train station" class="w-8 h-8"/>
+			`
+	});
+	let markersLayer = new leaflet.LayerGroup();
+	let markers = $derived(
+		destinations.map((destination) => ({
+			id: destination.stop.id,
+			marker: leaflet
+				.marker([destination.stop.lat, destination.stop.lon], { icon })
+				.bindPopup(`${destination.stop.name} (${displayDuration(destination.duration)})`)
+		}))
+	);
 
 	$effect(() => {
 		if (selectedDestination !== undefined) {
@@ -36,47 +43,41 @@
 		}
 	});
 
-	onMount(async () => {
-		leaflet = await import('leaflet');
+	$effect(() => {
+		if (map === undefined) {
+			map = leaflet.map(mapElement);
+			leaflet
+				.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+					attribution:
+						'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+				})
+				.addTo(map);
+			map.addLayer(markersLayer);
+		}
 
-		map = leaflet.map(mapElement);
+		markersLayer.clearLayers();
+
+		for (const { marker } of markers) {
+			markersLayer.addLayer(marker);
+		}
 
 		if (destinations.length > 0) {
 			map.fitBounds([
-				[minLat - deltaLat, minLon - deltaLon],
-				[maxLat + deltaLat, maxLon + deltaLon]
+				[bounds.lat.min, bounds.lon.min],
+				[bounds.lat.max, bounds.lon.max]
 			]);
 		} else {
 			map.setView([origin.lat, origin.lon], 13);
 		}
 
-		for (const destination of destinations) {
-			const icon = leaflet.divIcon({
-				html: `
-        <img src="/icons/station.svg" alt="Train station" class="w-8 h-8"/>
-      `
-			});
-			const marker = leaflet.marker([destination.stop.lat, destination.stop.lon], { icon });
-			leaflet;
-			markers.push({ id: destination.stop.id, marker });
-			marker
-				.addTo(map)
-				.bindPopup(`${destination.stop.name} (${displayDuration(destination.duration)})`);
-		}
-
 		const startIcon = leaflet.divIcon({
 			html: `
-        <img src="/icons/city.svg" alt="City" class="w-12 h-12 z-10"/>
-      `
+		    <img src="/icons/city.svg" alt="City" class="w-12 h-12 z-10"/>
+		  `
 		});
-		leaflet.marker([origin.lat, origin.lon], { icon: startIcon, zIndexOffset: 1000 }).addTo(map);
-
-		leaflet
-			.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-				attribution:
-					'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-			})
-			.addTo(map);
+		markersLayer.addLayer(
+			leaflet.marker([origin.lat, origin.lon], { icon: startIcon, zIndexOffset: 1000 })
+		);
 	});
 
 	onDestroy(async () => {
