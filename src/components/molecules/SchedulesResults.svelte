@@ -42,7 +42,7 @@
 		/>
 	</div>
 	<div class="flex flex-col-reverse gap-3 @min-[500px]:max-h-112 @min-[500px]:flex-row">
-		<div class="shrink-0 overflow-scroll @max-[500px]:h-96">
+		<div class="overflow-scroll @max-[500px]:h-96">
 			{#each filteredDestinations as destination (destination.stop.id)}
 				<div class="p-1 hover:bg-base-100" in:fade|global out:fade|global={{ duration: 50 }}>
 					<button onclick={() => (selectedDestination = destination)} class="w-full text-start">

@@ -55,7 +55,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="relative h-8 cursor-pointer" onclick={handleTrackClick}>
 		<!-- Track background -->
-		<div class="absolute top-1/2 h-2 w-full -translate-y-1/2 rounded-full bg-base-300"></div>
+		<div class="absolute top-1/2 h-2 w-full -translate-y-1/2 rounded-full bg-base-200"></div>
 
 		<!-- Active range highlight -->
 		<div
