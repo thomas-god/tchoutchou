@@ -55,7 +55,7 @@
         <img src="/icons/city.svg" alt="City" class="w-12 h-12 z-10"/>
       `
 		});
-		leaflet.marker([origin.lat, origin.lon], { icon: startIcon }).addTo(map);
+		leaflet.marker([origin.lat, origin.lon], { icon: startIcon, zIndexOffset: 1000 }).addTo(map);
 
 		leaflet
 			.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
