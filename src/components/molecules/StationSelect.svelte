@@ -18,21 +18,22 @@
 	};
 </script>
 
-<div class="flex flex-col">
-	<label class="flex flex-row items-center gap-3">
-		<span>{label}</span>
+<div class="flex max-w-80 flex-col">
+	<label class="flex flex-col gap-2">
+		<span class="text-sm font-semibold">{label}</span>
 		<input
 			type="text"
 			bind:value={query}
 			oninput={debounce}
-			class="input text-base-content input-info"
+			class="input w-full pl-2 text-base-content input-info"
 		/>
 	</label>
-	{#if station === undefined}
-		<ul>
+	{#if station === undefined && options.length > 0}
+		<ul class="flex flex-col items-start rounded-b-lg bg-base-100 p-2">
 			{#each options as option (option.id)}
-				<li>
+				<li class="p-0.5 hover:bg-base-300">
 					<button
+						class="text-start"
 						onclick={() => {
 							station = option;
 							query = option.name;

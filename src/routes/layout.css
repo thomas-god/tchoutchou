@@ -1,6 +1,8 @@
 @import 'tailwindcss';
 @import 'leaflet/dist/leaflet.css';
-@plugin 'daisyui';
+@plugin 'daisyui' {
+	themes: light --default;
+}
 
 .leaflet-div-icon {
 	border: none;

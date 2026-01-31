@@ -67,10 +67,9 @@
 
 	onDestroy(async () => {
 		if (map) {
-			console.log('Unloading Leaflet map.');
 			map.remove();
 		}
 	});
 </script>
 
-<div class="h-svh w-full" bind:this={mapElement}></div>
+<div class="h-full w-full" bind:this={mapElement}></div>
