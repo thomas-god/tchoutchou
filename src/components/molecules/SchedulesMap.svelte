@@ -9,9 +9,10 @@
 			lon: number;
 		};
 		destinations: Destination[];
+		selectedDestination: undefined | Destination;
 	}
 
-	let { origin, destinations: destinations }: Props = $props();
+	let { origin, destinations, selectedDestination }: Props = $props();
 
 	let mapElement: HTMLDivElement;
 	let map: any;
@@ -23,6 +24,17 @@
 	let maxLon = $derived(Math.max(...destinations.map((destination) => destination.stop.lon)));
 	let deltaLat = $derived((maxLat - minLat) * 0.001);
 	let deltaLon = $derived((maxLon - minLon) * 0.001);
+
+	let markers: any[] = $state([]);
+
+	$effect(() => {
+		if (selectedDestination !== undefined) {
+			const marker = markers.find((marker) => marker.id === selectedDestination.stop.id);
+			if (marker !== undefined) {
+				marker.marker.openPopup();
+			}
+		}
+	});
 
 	onMount(async () => {
 		leaflet = await import('leaflet');
@@ -44,8 +56,10 @@
         <img src="/icons/station.svg" alt="Train station" class="w-8 h-8"/>
       `
 			});
-			leaflet
-				.marker([destination.stop.lat, destination.stop.lon], { icon })
+			const marker = leaflet.marker([destination.stop.lat, destination.stop.lon], { icon });
+			leaflet;
+			markers.push({ id: destination.stop.id, marker });
+			marker
 				.addTo(map)
 				.bindPopup(`${destination.stop.name} (${displayDuration(destination.duration)})`);
 		}
