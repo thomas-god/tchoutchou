@@ -2,7 +2,6 @@
 	import { fade } from 'svelte/transition';
 	import { displayDuration } from '$lib';
 	import type { Station } from '$lib/station.remote';
-	import DurationRange from '../atoms/DurationRange.svelte';
 	import type { Trip } from '$lib/server/graph';
 	import type { Node } from '$lib/schedule';
 	import TripsMap from './TripsMap.svelte';
@@ -16,17 +15,6 @@
 
 	let selectedDestination: undefined | Destination = $state(undefined);
 
-	let durationStep = 900; // 15min
-	let maxDuration = $derived(
-		Math.max(...destinations.map((destination) => destination.trip.duration))
-	);
-	let durationRange = $derived({ min: 0, max: maxDuration });
-
-	let filteredDestinations = $derived(
-		destinations.filter(
-			(dest) => dest.trip.duration <= durationRange.max && dest.trip.duration >= durationRange.min
-		)
-	);
 	let bounds = $derived({
 		lat: {
 			min: Math.min(...destinations.map((destination) => destination.node.lat)),
@@ -41,17 +29,9 @@
 
 <div class="@container flex flex-col gap-3 bg-base-300 p-3">
 	<h2 class="text-sm font-semibold">{destinations.length} destinations trouvées</h2>
-	<div class="max-w-80">
-		<h3 class="text-md italic">Durée du trajet</h3>
-		<DurationRange
-			range={{ min: 0, max: maxDuration }}
-			bind:selection={durationRange}
-			step={durationStep}
-		/>
-	</div>
 	<div class="flex flex-col-reverse gap-3 @min-[500px]:max-h-112 @min-[500px]:flex-row">
 		<div class="overflow-scroll @max-[500px]:h-96">
-			{#each filteredDestinations as destination (destination.node.id)}
+			{#each destinations as destination (destination.node.id)}
 				<div class="p-1 hover:bg-base-100" in:fade|global out:fade|global={{ duration: 50 }}>
 					<button onclick={() => (selectedDestination = destination)} class="w-full text-start">
 						<h3 class="text-md font-semibold">{destination.node.name}</h3>
@@ -67,7 +47,7 @@
 		<div class="max-h-112 min-h-112 @max-[500px]:h-96 @min-[500px]:w-full">
 			<TripsMap
 				origin={{ lat: origin.lat, lon: origin.lon }}
-				destinations={filteredDestinations}
+				{destinations}
 				{selectedDestination}
 				{bounds}
 			/>

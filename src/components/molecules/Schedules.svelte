@@ -4,6 +4,7 @@
 	import type { Station } from '$lib/station.remote';
 	import { fetchDestinationsQuery } from '$lib/remote/graph.remote';
 	import TripsResults from './TripsResults.svelte';
+	import DurationRange from '../atoms/DurationRange.svelte';
 
 	const today = dayjs();
 	const nextWeek = today.add(1, 'week');
@@ -12,13 +13,19 @@
 	let stop: Station | undefined = $state(undefined);
 	let from: string = $state(format(today));
 	let maxConnections = $state(1);
+	const maxDurationUpperBound = 24 * 3600;
+	let durationRange = $derived({ min: 3600, max: 8 * 3600 });
 
 	let tripsPromise = $derived.by(() => {
 		if (stop === undefined || from === undefined) {
 			return undefined;
 		}
 
-		return fetchDestinationsQuery({ origin: stop.id, from, maxConnections });
+		return fetchDestinationsQuery({
+			origin: stop.id,
+			from,
+			filters: { maxConnections, minDuration: durationRange.min, maxDuration: durationRange.max }
+		});
 	});
 </script>
 
@@ -27,7 +34,7 @@
 		<fieldset class="fieldset">
 			<StationSelect bind:station={stop} label={'Gare de départ'} />
 
-			<div class="flex flex-col items-start gap-2">
+			<div class="flex flex-col items-start justify-stretch gap-2">
 				<label for="select-from-date" class="text-sm font-semibold">Date de départ </label>
 				<input
 					type="date"
@@ -47,6 +54,16 @@
 							onclick={() => (maxConnections = connection)}>{connection}</button
 						>
 					{/each}
+				</div>
+			</div>
+			<div class="flex max-w-90 flex-col items-start gap-2">
+				<p class="text-sm font-semibold">Durée du trajet</p>
+				<div class="w-full">
+					<DurationRange
+						range={{ min: 0, max: maxDurationUpperBound }}
+						bind:selection={durationRange}
+						step={1800}
+					/>
 				</div>
 			</div>
 		</fieldset>

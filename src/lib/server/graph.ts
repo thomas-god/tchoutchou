@@ -62,13 +62,19 @@ const internalTripToTrip = (internalTrip: InternalTrip): Trip => {
 	};
 };
 
+export interface DestinationsFilters {
+	maxConnections: number;
+	minDuration: number;
+	maxDuration: number;
+}
+
 export const findDestinations = async (
 	origin: string,
 	from: dayjs.Dayjs,
-	maxConnections = 1
+	filters: DestinationsFilters
 ): Promise<{ node: Node; trip: Trip }[]> => {
 	const graph = await getGraph(from);
-	const maxLegs = maxConnections < 3 ? maxConnections + 1 : 3;
+	const maxLegs = filters.maxConnections < 3 ? filters.maxConnections + 1 : 3;
 
 	const initialTrips: InternalTrip[] = [
 		{
@@ -79,14 +85,21 @@ export const findDestinations = async (
 		}
 	];
 
-	const trips = findTrips(initialTrips, graph, maxLegs)
+	const trips = findTrips(initialTrips, graph, maxLegs, filters.maxDuration)
 		.filter((trip) => trip.legs.length > 0)
 		.map(internalTripToTrip);
 
-	return deduplicateTripsByDestination(trips, graph.nodes);
+	return deduplicateTripsByDestination(trips, graph.nodes).filter(
+		({ trip }) => trip.duration >= filters.minDuration
+	);
 };
 
-const findTrips = (trips: InternalTrip[], graph: Graph, maxLegs: number): InternalTrip[] => {
+const findTrips = (
+	trips: InternalTrip[],
+	graph: Graph,
+	maxLegs: number,
+	maxDuration: number
+): InternalTrip[] => {
 	const newTrips: InternalTrip[] = [];
 
 	for (const trip of trips) {
@@ -95,7 +108,9 @@ const findTrips = (trips: InternalTrip[], graph: Graph, maxLegs: number): Intern
 			for (const candidate of possibleTrips) {
 				const canCatchCandidate = dayjs(candidate.departure) > trip.current;
 				const notVisitedDestinationYet = !trip.visitedStops.includes(candidate.destination);
-				if (canCatchCandidate && notVisitedDestinationYet) {
+				const tripTotalDurationNotExceeded = expectedDuration(trip, candidate) <= maxDuration;
+
+				if (canCatchCandidate && notVisitedDestinationYet && tripTotalDurationNotExceeded) {
 					newTrips.push({
 						currentStop: candidate.destination,
 						current: dayjs(candidate.arrival),
@@ -108,10 +123,14 @@ const findTrips = (trips: InternalTrip[], graph: Graph, maxLegs: number): Intern
 	}
 
 	if (newTrips.length > 0) {
-		return [...trips, ...findTrips(newTrips, graph, maxLegs)];
+		return [...trips, ...findTrips(newTrips, graph, maxLegs, maxDuration)];
 	} else {
 		return trips;
 	}
+};
+
+const expectedDuration = (trip: InternalTrip, candidateLeg: Edge): number => {
+	return dayjs(candidateLeg.arrival).diff(trip.legs.at(0)?.departure, 'second');
 };
 
 const tripDuration = (trip: Trip): number =>
