@@ -119,8 +119,9 @@ export interface Graph {
 }
 
 export const getEdgesAndNodes = async (date: dayjs.Dayjs): Promise<Graph> => {
-	const edgesFile = `${date.format('YYYYMMDD')}_edges.json`;
-	const nodesFile = `${date.format('YYYYMMDD')}_nodes.json`;
+	const location = getEnv('VITE_DATA_PATH');
+	const edgesFile = `${location}/${date.format('YYYYMMDD')}_edges.json`;
+	const nodesFile = `${location}/${date.format('YYYYMMDD')}_nodes.json`;
 	if (!existsSync(edgesFile) || !existsSync(nodesFile)) {
 		console.log(`No edges/nodes files found for ${date.format('YYYYMMDD')}, fetching data`);
 		return await persistEdgesAndNodes(date);
@@ -155,8 +156,12 @@ export const persistEdgesAndNodes = async (date: dayjs.Dayjs): Promise<Graph> =>
 	}
 
 	const edgesByNode = mergeEdgesByNode(edges);
-	await writeFile(`${date.format('YYYYMMDD')}_edges.json`, JSON.stringify([...edgesByNode]));
-	await writeFile(`${date.format('YYYYMMDD')}_nodes.json`, JSON.stringify([...nodes]));
+	const location = getEnv('VITE_DATA_PATH');
+	await writeFile(
+		`${location}/${date.format('YYYYMMDD')}_edges.json`,
+		JSON.stringify([...edgesByNode])
+	);
+	await writeFile(`${location}/${date.format('YYYYMMDD')}_nodes.json`, JSON.stringify([...nodes]));
 
 	console.log(`${nodes.size} nodes and ${edges.length} edges persisted`);
 	return { nodes, edgesByNode };
