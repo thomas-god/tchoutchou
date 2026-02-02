@@ -13,6 +13,7 @@ export interface Edge {
 	departure: string;
 	arrival: string;
 	intermediaryStops: string[];
+	route: string;
 }
 
 export const splitScheduleIntoNodeAndEdges = (
@@ -43,6 +44,7 @@ export const splitScheduleIntoNodeAndEdges = (
 					destination: destination.id,
 					departure: origin.date_time,
 					arrival: destination.date_time,
+					route: trip.id,
 					intermediaryStops
 				});
 			}
