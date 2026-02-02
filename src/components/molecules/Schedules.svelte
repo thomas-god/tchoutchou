@@ -9,12 +9,7 @@
 	const nextWeek = today.add(1, 'week');
 	const format = (d: dayjs.Dayjs) => d.format('YYYY-MM-DD');
 
-	let stop: Station | undefined = $state({
-		id: 'stop_point:SNCF:87319012:LongDistanceTrain',
-		name: 'Aix-en-Provence TGV (Aix-en-Provence)',
-		lon: 5.317534,
-		lat: 43.455237
-	});
+	let stop: Station | undefined = $state(undefined);
 	let from: string = $state(format(today));
 	let maxConnections = $state(1);
 
