@@ -11,17 +11,17 @@
 		selection = $bindable(),
 		step
 	}: { range: Range; selection: Range; step: number } = $props();
-	let min = $derived(Math.floor(range.min / step) * step);
+	let min = $derived(Math.max(0, Math.floor(range.min / step) * step));
 	let max = $derived(Math.ceil(range.max / step) * step);
 
 	function handleMinChange(e: Event) {
 		const value = Number((e.target as HTMLInputElement).value);
-		selection = { ...selection, min: Math.min(value, selection.max - step) };
+		selection = { ...selection, min: Math.max(range.min, Math.min(value, selection.max - step)) };
 	}
 
 	function handleMaxChange(e: Event) {
 		const value = Number((e.target as HTMLInputElement).value);
-		selection = { ...selection, max: Math.max(value, selection.min + step) };
+		selection = { ...selection, max: Math.min(range.max, Math.max(value, selection.min + step)) };
 	}
 
 	// Calculate the percentage position for styling
@@ -41,11 +41,17 @@
 		const distToMax = Math.abs(clickValue - selection.max);
 
 		if (distToMin < distToMax) {
-			// Update min thumb, but don't let it exceed max
-			selection = { ...selection, min: Math.min(clickValue, selection.max - step) };
+			// Update min thumb, but don't let it exceed max or go below range.min
+			selection = {
+				...selection,
+				min: Math.max(range.min, Math.min(clickValue, selection.max - step))
+			};
 		} else {
-			// Update max thumb, but don't let it go below min
-			selection = { ...selection, max: Math.max(clickValue, selection.min + step) };
+			// Update max thumb, but don't let it go below min or exceed range.max
+			selection = {
+				...selection,
+				max: Math.min(range.max, Math.max(clickValue, selection.min + step))
+			};
 		}
 	}
 </script>
