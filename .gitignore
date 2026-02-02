@@ -26,3 +26,7 @@ vite.config.ts.timestamp-*
 *.db
 *.db-shm
 *.db-wal
+
+# Trips data
+*_edges.json
+*_nodes.json

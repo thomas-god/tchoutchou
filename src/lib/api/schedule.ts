@@ -1,6 +1,14 @@
 import { getEnv } from '$lib/env';
+import {
+	mergeEdgesByNode,
+	splitScheduleIntoNodeAndEdges,
+	type Edge,
+	type Node
+} from '$lib/schedule';
 import { getDb } from '$lib/server/db';
 import dayjs from 'dayjs';
+import { existsSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import z from 'zod';
 
 export type LineSchedule = Schedule[];
@@ -103,4 +111,53 @@ export const fetchLineSchedule = async ({ line, from }: Schema): Promise<LineSch
 	}
 
 	return line_schedule;
+};
+
+export interface Graph {
+	nodes: Map<string, Node>;
+	edgesByNode: Map<string, Edge[]>;
+}
+
+export const getEdgesAndNodes = async (date: dayjs.Dayjs): Promise<Graph> => {
+	const edgesFile = `${date.format('YYYYMMDD')}_edges.json`;
+	const nodesFile = `${date.format('YYYYMMDD')}_nodes.json`;
+	if (!existsSync(edgesFile) || !existsSync(nodesFile)) {
+		console.log(`No edges/nodes files found for ${date.format('YYYYMMDD')}, fetching data`);
+		return await persistEdgesAndNodes(date);
+	}
+
+	const nodes: Map<string, Node> = new Map(
+		JSON.parse(await readFile(nodesFile, { encoding: 'utf-8' }))
+	);
+	const edgesByNode: Map<string, Edge[]> = new Map(
+		JSON.parse(await readFile(edgesFile, { encoding: 'utf-8' }))
+	);
+
+	return { nodes, edgesByNode };
+};
+
+export const persistEdgesAndNodes = async (date: dayjs.Dayjs): Promise<Graph> => {
+	const db = getDb();
+
+	const lines = db.prepare('SELECT id FROM t_lines ORDER BY NAME;').all() as {
+		id: string;
+	}[];
+
+	let nodes: Map<string, Node> = new Map();
+	let edges: Edge[] = [];
+	for (const line of lines) {
+		const schedules = await fetchLineSchedule({ line: line.id, from: date.toDate() });
+		const { nodes: _nodes, edges: _edges } = splitScheduleIntoNodeAndEdges(schedules);
+		edges = [...edges, ..._edges];
+		for (const [id, node] of _nodes.entries()) {
+			nodes.set(id, node);
+		}
+	}
+
+	const edgesByNode = mergeEdgesByNode(edges);
+	await writeFile(`${date.format('YYYYMMDD')}_edges.json`, JSON.stringify([...edgesByNode]));
+	await writeFile(`${date.format('YYYYMMDD')}_nodes.json`, JSON.stringify([...nodes]));
+
+	console.log(`${nodes.size} nodes and ${edges.length} edges persisted`);
+	return { nodes, edgesByNode };
 };
