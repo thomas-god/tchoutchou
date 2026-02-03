@@ -30,7 +30,8 @@ export interface TripLeg {
 }
 
 interface InternalTripLeg extends TripLeg {
-	departureDt: number
+	departureDt: number;
+	arrivalDt: number;
 }
 
 interface InternalTrip {
@@ -47,17 +48,15 @@ const edgeToTripLeg = (edge: Edge): InternalTripLeg => {
 		destination: edge.destination,
 		departure: edge.departure,
 		departureDt: edge.departureDt,
-		arrival: edge.arrival
+		arrival: edge.arrival,
+		arrivalDt: edge.arrivalDt
 	};
 };
 
 const internalTripToTrip = (internalTrip: InternalTrip): Trip => {
 	const duration =
 		internalTrip.legs.length > 0
-			? dayjs(internalTrip.legs.at(-1)!.arrival).diff(
-					dayjs(internalTrip.legs.at(0)!.departure),
-					'second'
-				)
+			? internalTrip.legs.at(-1)!.arrivalDt - internalTrip.legs.at(0)!.departureDt
 			: -1;
 	return {
 		origin: internalTrip.legs.at(0)!.origin,
@@ -138,9 +137,6 @@ const expectedDuration = (trip: InternalTrip, candidateLeg: Edge): number => {
 	return candidateLeg.arrivalDt - (trip.legs.at(0)?.departureDt || candidateLeg.departureDt);
 };
 
-const tripDuration = (trip: Trip): number =>
-	dayjs(trip.legs.at(-1)!.arrival).diff(dayjs(trip.legs.at(0)!.departure), 'second');
-
 export const deduplicateTripsByDestination = (
 	trips: Trip[],
 	nodes: Map<string, Node>
@@ -156,7 +152,7 @@ export const deduplicateTripsByDestination = (
 		if (existingTrip === undefined) {
 			bestTrips.set(trip.destination, { node: nodes.get(trip.destination)!, trip });
 		} else {
-			if (tripDuration(trip) < tripDuration(existingTrip.trip)) {
+			if (trip.duration < existingTrip.trip.duration) {
 				bestTrips.set(trip.destination, { node: nodes.get(trip.destination)!, trip });
 			}
 		}
