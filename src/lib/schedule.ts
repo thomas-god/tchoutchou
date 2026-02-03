@@ -1,3 +1,4 @@
+import dayjs from 'dayjs';
 import type { LineSchedule } from './api/schedule';
 
 export interface Node {
@@ -11,7 +12,9 @@ export interface Edge {
 	origin: string;
 	destination: string;
 	departure: string;
+	departureDt: number;
 	arrival: string;
+	arrivalDt: number;
 	intermediaryStops: string[];
 	route: string;
 }
@@ -43,7 +46,9 @@ export const splitScheduleIntoNodeAndEdges = (
 					origin: origin.id,
 					destination: destination.id,
 					departure: origin.date_time,
+					departureDt: dayjs(origin.date_time).unix(),
 					arrival: destination.date_time,
+					arrivalDt: dayjs(destination.date_time).unix(),
 					route: trip.id,
 					intermediaryStops
 				});

@@ -29,19 +29,24 @@ export interface TripLeg {
 	arrival: string;
 }
 
+interface InternalTripLeg extends TripLeg {
+	departureDt: number
+}
+
 interface InternalTrip {
 	visitedStops: string[];
 	currentStop: string;
-	current: dayjs.Dayjs;
-	legs: TripLeg[];
+	current: number;
+	legs: InternalTripLeg[];
 }
 
-const edgeToTripLeg = (edge: Edge): TripLeg => {
+const edgeToTripLeg = (edge: Edge): InternalTripLeg => {
 	return {
 		routeId: edge.route,
 		origin: edge.origin,
 		destination: edge.destination,
 		departure: edge.departure,
+		departureDt: edge.departureDt,
 		arrival: edge.arrival
 	};
 };
@@ -79,7 +84,7 @@ export const findDestinations = async (
 	const initialTrips: InternalTrip[] = [
 		{
 			currentStop: origin,
-			current: from,
+			current: from.unix(),
 			visitedStops: [],
 			legs: []
 		}
@@ -106,14 +111,14 @@ const findTrips = (
 		if (trip.legs.length < maxLegs) {
 			const possibleTrips = graph.edgesByNode.get(trip.currentStop) || [];
 			for (const candidate of possibleTrips) {
-				const canCatchCandidate = dayjs(candidate.departure) > trip.current;
+				const canCatchCandidate = candidate.departureDt > trip.current;
 				const notVisitedDestinationYet = !trip.visitedStops.includes(candidate.destination);
 				const tripTotalDurationNotExceeded = expectedDuration(trip, candidate) <= maxDuration;
 
 				if (canCatchCandidate && notVisitedDestinationYet && tripTotalDurationNotExceeded) {
 					newTrips.push({
 						currentStop: candidate.destination,
-						current: dayjs(candidate.arrival),
+						current: candidate.arrivalDt,
 						visitedStops: [...trip.visitedStops, ...candidate.intermediaryStops],
 						legs: [...trip.legs, edgeToTripLeg(candidate)]
 					});
@@ -130,7 +135,7 @@ const findTrips = (
 };
 
 const expectedDuration = (trip: InternalTrip, candidateLeg: Edge): number => {
-	return dayjs(candidateLeg.arrival).diff(trip.legs.at(0)?.departure, 'second');
+	return candidateLeg.arrivalDt - (trip.legs.at(0)?.departureDt || candidateLeg.departureDt);
 };
 
 const tripDuration = (trip: Trip): number =>
