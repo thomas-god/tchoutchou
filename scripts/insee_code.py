@@ -7,6 +7,7 @@
 
 import httpx
 import json
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -52,154 +53,157 @@ def get_city_from_coordinates(lat: float, lon: float) -> dict | tuple[None, str]
         return None, error_msg
 
 
-def enrich_cities_from_file(input_file: Path, output_file: Path) -> None:
+def create_insee_table(cursor: sqlite3.Cursor) -> None:
     """
-    Load a JSON file with cities, enrich each with API data, and save to a new file.
+    Create the t_insee table and associated indexes.
 
     Args:
-        input_file: Path to input JSON file
-        output_file: Path to output JSON file
+        cursor: SQLite database cursor
     """
-    # Load the input file
-    print(f"Loading {input_file}...")
-    with open(input_file, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS t_insee (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id INTEGER NOT NULL,
+            insee_code TEXT,
+            city_name TEXT,
+            department_code TEXT,
+            region_code TEXT,
+            population INTEGER,
+            postal_codes TEXT,
+            error_message TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (node_id) REFERENCES t_nodes(id)
+        )
+    """)
 
-    total_entries = len(data)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_insee_node_id ON t_insee(node_id)
+    """)
+
+
+def enrich_cities_from_db(db_path: Path) -> None:
+    """
+    Load nodes from t_nodes table, enrich each with API data, and save to t_insee table.
+
+    Args:
+        db_path: Path to SQLite database file
+    """
+    # Connect to database
+    print(f"Connecting to {db_path}...")
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Create t_insee table
+    print("Creating table t_insee...")
+    create_insee_table(cursor)
+
+    # Load nodes from t_nodes
+    print("Loading nodes from t_nodes...")
+    cursor.execute("SELECT id, sncf_id, name, lat, lon FROM t_nodes")
+    nodes = cursor.fetchall()
+
+    total_entries = len(nodes)
     enriched_count = 0
-    skipped_count = 0
     error_count = 0
-    failures = []  # Track failed entries with reasons
 
     # Rate limiting: 50 calls/s = 0.02s per call
     rate_limit_delay = 0.02
 
-    print(f"Processing {total_entries} entries...")
+    print(f"Processing {total_entries} nodes...")
     print(f"Rate limit: 50 calls/s (waiting {rate_limit_delay}s between calls)")
 
-    for i, entry in enumerate(data):
-        # Skip empty entries
-        if not entry or len(entry) < 2:
-            failures.append({"index": i, "stop_id": None, "reason": "Empty entry"})
-            skipped_count += 1
-            continue
-
-        stop_id, stop_data = entry
-
-        # Skip if no coordinates
-        if not stop_data or "lat" not in stop_data or "lon" not in stop_data:
-            failures.append(
-                {
-                    "index": i,
-                    "stop_id": stop_id,
-                    "stop_name": stop_data.get("name") if stop_data else None,
-                    "reason": "Missing coordinates",
-                }
-            )
-            skipped_count += 1
-            continue
-
+    for i, (node_id, sncf_id, name, lat, lon) in enumerate(nodes):
         try:
-            lat = float(stop_data["lat"])
-            lon = float(stop_data["lon"])
-
             # Get city information from API
             result = get_city_from_coordinates(lat, lon)
 
             if isinstance(result, dict):
-                # Enrich the stop data with city information
-                stop_data["insee_code"] = result.get("code")
-                stop_data["city_name"] = result.get("nom")
-                stop_data["department_code"] = result.get("codeDepartement")
-                stop_data["region_code"] = result.get("codeRegion")
-                stop_data["population"] = result.get("population")
-                stop_data["postal_codes"] = result.get("codesPostaux", [])
+                # Insert enriched data
+                postal_codes_json = json.dumps(result.get("codesPostaux", []))
+                cursor.execute(
+                    """
+                    INSERT INTO t_insee 
+                    (node_id, insee_code, city_name, department_code, region_code, population, postal_codes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        node_id,
+                        result.get("code"),
+                        result.get("nom"),
+                        result.get("codeDepartement"),
+                        result.get("codeRegion"),
+                        result.get("population"),
+                        postal_codes_json,
+                    ),
+                )
                 enriched_count += 1
             else:
                 # result is (None, error_message)
                 _, error_message = result
-                failures.append(
-                    {
-                        "index": i,
-                        "stop_id": stop_id,
-                        "stop_name": stop_data.get("name"),
-                        "lat": lat,
-                        "lon": lon,
-                        "reason": error_message,
-                    }
+                cursor.execute(
+                    """
+                    INSERT INTO t_insee (node_id, error_message)
+                    VALUES (?, ?)
+                    """,
+                    (node_id, error_message),
                 )
                 error_count += 1
+
+            # Commit every 50 entries
+            if (i + 1) % 50 == 0:
+                conn.commit()
+                print(
+                    f"Progress: {i + 1}/{total_entries} | Enriched: {enriched_count} | Errors: {error_count}"
+                )
 
             # Rate limiting
             time.sleep(rate_limit_delay)
 
-            # Progress update every 50 entries
-            if (i + 1) % 50 == 0:
-                print(
-                    f"Progress: {i + 1}/{total_entries} | Enriched: {enriched_count} | Errors: {error_count} | Skipped: {skipped_count}"
-                )
-
-        except (ValueError, KeyError) as e:
-            failures.append(
-                {
-                    "index": i,
-                    "stop_id": stop_id,
-                    "stop_name": stop_data.get("name") if stop_data else None,
-                    "reason": f"Exception: {type(e).__name__}: {str(e)}",
-                }
+        except Exception as e:
+            error_message = f"{type(e).__name__}: {str(e)}"
+            print(
+                f"Error processing node {node_id} ({name}): {error_message}",
+                file=sys.stderr,
             )
-            print(f"Error processing entry {i}: {e}", file=sys.stderr)
+            cursor.execute(
+                """
+                INSERT INTO t_insee (node_id, error_message)
+                VALUES (?, ?)
+                """,
+                (node_id, error_message),
+            )
             error_count += 1
 
-    # Write enriched data to output file
-    print(f"\nWriting enriched data to {output_file}...")
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-    # Write failures report if there are any
-    if failures:
-        failures_file = output_file.parent / f"{output_file.stem}_failures.json"
-        print(f"Writing failures report to {failures_file}...")
-        with open(failures_file, "w", encoding="utf-8") as f:
-            json.dump(failures, f, ensure_ascii=False, indent=2)
+    # Final commit
+    conn.commit()
+    conn.close()
 
     print(f"\nDone!")
-    print(f"  Total entries: {total_entries}")
+    print(f"  Total nodes: {total_entries}")
     print(f"  Enriched: {enriched_count}")
     print(f"  Errors: {error_count}")
-    print(f"  Skipped: {skipped_count}")
-
-    if failures:
-        print(f"\n⚠️  Failed entries saved to: {failures_file}")
-        print(f"\nFailure breakdown:")
-        failure_reasons = {}
-        for failure in failures:
-            reason = failure["reason"]
-            failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
-        for reason, count in sorted(
-            failure_reasons.items(), key=lambda x: x[1], reverse=True
-        ):
-            print(f"  - {reason}: {count}")
 
 
 def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Enrich city data with INSEE codes from geo.api.gouv.fr"
+        description="Enrich node data with INSEE codes from geo.api.gouv.fr"
     )
-    parser.add_argument("input_file", type=Path, help="Input JSON file with city data")
     parser.add_argument(
-        "output_file", type=Path, help="Output JSON file for enriched data"
+        "--db",
+        type=Path,
+        default=Path(__file__).parent / "nodes.db",
+        help="Path to SQLite database file (default: nodes.db in script directory)",
     )
 
     args = parser.parse_args()
 
-    if not args.input_file.exists():
-        print(f"Error: Input file {args.input_file} does not exist", file=sys.stderr)
+    if not args.db.exists():
+        print(f"Error: Database file {args.db} does not exist", file=sys.stderr)
         sys.exit(1)
 
-    enrich_cities_from_file(args.input_file, args.output_file)
+    enrich_cities_from_db(args.db)
 
 
 if __name__ == "__main__":
