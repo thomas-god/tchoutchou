@@ -98,6 +98,24 @@ Monthly weather averages (2020-2025) for each station node.
 
 ---
 
+### t_museum
+
+Museum count per postal code from the French Ministry of Culture database.
+
+**Columns:**
+
+- `id` (INTEGER, PK) - Auto-incrementing technical ID
+- `postal_code` (TEXT, UNIQUE) - French postal code (e.g., "75001")
+- `museum_count` (INTEGER) - Number of museums in this postal code
+- `created_at` (TIMESTAMP) - Record creation time
+
+**Index:** `idx_museum_postal_code` on `postal_code`
+
+**Note:** This table is not directly linked to t_nodes via foreign keys, but can
+be joined using the postal_codes field in t_insee.
+
+---
+
 ## Relationships
 
 ```
@@ -145,4 +163,15 @@ SELECT n.name, i.city_name, i.department_code, i.population
 FROM t_nodes n
 JOIN t_insee i ON n.id = i.node_id
 WHERE i.error_message IS NULL;
+```
+
+### Get stations with museum count
+
+```sql
+SELECT n.name, i.city_name, i.postal_codes, m.museum_count
+FROM t_nodes n
+JOIN t_insee i ON n.id = i.node_id
+JOIN t_museum m ON json_extract(i.postal_codes, '$[0]') = m.postal_code
+WHERE m.museum_count > 0
+ORDER BY m.museum_count DESC;
 ```
