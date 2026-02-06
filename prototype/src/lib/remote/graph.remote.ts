@@ -1,5 +1,6 @@
 import { query } from '$app/server';
-import { findDestinations } from '$lib/server/graph';
+import type { Node } from '$lib/schedule';
+import { findDestinations, getGraph } from '$lib/server/graph';
 import dayjs from 'dayjs';
 
 import z from 'zod';
@@ -18,3 +19,14 @@ export const fetchDestinationsQuery = query(
 		return await findDestinations(origin, dayjs(from), filters);
 	}
 );
+
+export const fetchNodesQuery = query(z.object({ from: z.string() }), async ({ from }) => {
+	const nodes: Node[] = [];
+	const graph = await getGraph(dayjs(from));
+
+	for (const [_, node] of graph.nodes.entries()) {
+		nodes.push(node);
+	}
+
+	return nodes;
+});
