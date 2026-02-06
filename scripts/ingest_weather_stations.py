@@ -52,19 +52,19 @@ def create_weather_station_table(cursor: sqlite3.Cursor) -> None:
     """)
 
 
-def fetch_weather_stations(bearer_token: str, department_ids: list[str]) -> list[dict]:
+def fetch_weather_stations(api_key: str, department_ids: list[str]) -> list[dict]:
     """
     Fetch weather stations from Meteo France API for given departments.
 
     Args:
-        bearer_token: API authorization bearer token
+        api_key: API key
         department_ids: List of department IDs to fetch stations for
 
     Returns:
         List of station dictionaries
     """
     url = "https://public-api.meteofrance.fr/public/DPClim/v1/liste-stations/horaire"
-    headers = {"accept": "*/*", "Authorization": f"Bearer {bearer_token}"}
+    headers = {"accept": "*/*", "apikey": api_key}
 
     all_stations = []
 
@@ -72,7 +72,7 @@ def fetch_weather_stations(bearer_token: str, department_ids: list[str]) -> list
         print(f"Fetching stations for department {dept_id}...")
         params = {
             "id-departement": dept_id,
-            "parametre": ["temperature", "precipitation"],
+            "parametre": ["temperature", "precipitation", "insolation"],
         }
 
         max_retries = 5
@@ -197,11 +197,6 @@ def main() -> None:
         help="Path to SQLite database file (default: nodes.db in script directory)",
     )
     parser.add_argument(
-        "--token",
-        type=str,
-        help="Meteo France API bearer token (or set METEO_FRANCE_API_KEY in .env file)",
-    )
-    parser.add_argument(
         "--departments",
         type=str,
         nargs="+",
@@ -211,10 +206,10 @@ def main() -> None:
     args = parser.parse_args()
 
     # Get API token from argument or environment variable
-    api_token = args.token or os.getenv("METEO_FRANCE_API_KEY")
+    api_token = os.getenv("METEO_FRANCE_API_KEY")
     if not api_token:
         print(
-            "Error: API token not provided. Use --token argument or set METEO_FRANCE_API_KEY in .env file",
+            "Error: API token not provided. Set METEO_FRANCE_API_KEY in .env file",
             file=sys.stderr,
         )
         sys.exit(1)
