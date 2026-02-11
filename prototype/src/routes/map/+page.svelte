@@ -3,20 +3,15 @@
 	import dayjs from 'dayjs';
 	import StationsMap from '../../components/molecules/StationsMap.svelte';
 
-	let nodes = await fetchNodesQuery({ from: dayjs().toISOString() });
-
-	let bounds = $derived({
-		lat: {
-			min: Math.min(...nodes.map((node) => node.lat)),
-			max: Math.max(...nodes.map((node) => node.lat))
-		},
-		lon: {
-			min: Math.min(...nodes.map((node) => node.lon)),
-			max: Math.max(...nodes.map((node) => node.lon))
-		}
-	});
+	let nodesPromise = fetchNodesQuery({ from: dayjs().toISOString() });
 </script>
 
-<div class="h-lvh w-full">
-	<StationsMap stations={nodes} {bounds} />
-</div>
+{#await nodesPromise}
+	<div class="flex w-full flex-col items-center">
+		<span class="loading mx-auto mt-12 loading-xl loading-spinner text-center"></span>
+	</div>
+{:then nodes}
+	<div class="h-lvh w-full">
+		<StationsMap stations={nodes} />
+	</div>
+{/await}

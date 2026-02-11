@@ -5,13 +5,23 @@
 
 	interface Props {
 		stations: Node[];
-		bounds: { lat: { min: number; max: number }; lon: { min: number; max: number } };
 	}
 
-	let { stations, bounds }: Props = $props();
+	let { stations }: Props = $props();
 
 	let mapElement: HTMLDivElement;
 	let map: any = $state(undefined);
+
+	let bounds = $derived({
+		lat: {
+			min: Math.min(...stations.map((node) => node.lat)),
+			max: Math.max(...stations.map((node) => node.lat))
+		},
+		lon: {
+			min: Math.min(...stations.map((node) => node.lon)),
+			max: Math.max(...stations.map((node) => node.lon))
+		}
+	});
 
 	const icon = leaflet.divIcon({
 		html: `
@@ -28,6 +38,7 @@
 
 	$effect(() => {
 		if (map === undefined) {
+			console.log(mapElement);
 			map = leaflet.map(mapElement);
 			leaflet
 				.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
