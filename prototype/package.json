@@ -43,6 +43,7 @@
 		"vitest-browser-svelte": "^2.0.1"
 	},
 	"dependencies": {
+		"@geoman-io/leaflet-geoman-free": "^2.19.2",
 		"daisyui": "^5.5.14",
 		"dayjs": "^1.11.19",
 		"leaflet": "^1.9.4",
