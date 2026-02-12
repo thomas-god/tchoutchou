@@ -32,6 +32,8 @@
 	let editingName = $state('');
 	let editingCategory = $state<'sea' | 'mountain'>('sea');
 	let originalCoordinates: any = $state(null);
+	let originalName = $state('');
+	let originalCategory = $state<'sea' | 'mountain'>('sea');
 
 	// Hover state
 	let hoveredZoneId: string | null = $state(null);
@@ -221,7 +223,9 @@
 			editingZoneId = id;
 			editingName = zone.name;
 			editingCategory = zone.category;
-			// Store original coordinates for potential rollback
+			// Store original values for comparison and rollback
+			originalName = zone.name;
+			originalCategory = zone.category;
 			originalCoordinates = JSON.parse(JSON.stringify(zone.coordinates));
 
 			layer.pm.enable();
@@ -241,6 +245,8 @@
 			editingZoneId = null;
 			editingName = '';
 			editingCategory = 'sea';
+			originalName = '';
+			originalCategory = 'sea';
 			originalCoordinates = null;
 		}
 	};
@@ -250,6 +256,15 @@
 			const layer = zoneLayers.get(editingZoneId);
 			// Get current coordinates directly from the layer
 			const currentCoordinates = layer ? layer.getLatLngs()[0] : null;
+
+			// Check if name or category changed
+			const nameOrCategoryChanged =
+				editingName !== originalName || editingCategory !== originalCategory;
+
+			// If name or category changed, delete the old zone from database
+			if (nameOrCategoryChanged) {
+				deleteZoneRemote({ category: originalCategory, name: originalName });
+			}
 
 			// Save all changes including coordinates
 			zones = zones.map((z) =>
@@ -266,7 +281,7 @@
 					: z
 			);
 
-			// TODO: if zone name has changed, we should delete the zone corresponding to the previous name
+			// Insert/update the zone in database
 			const zone = zones.find((z) => zoneId(z) === editingZoneId)!;
 			insertZone(zone);
 
@@ -276,6 +291,8 @@
 			editingZoneId = null;
 			editingName = '';
 			editingCategory = 'sea';
+			originalName = '';
+			originalCategory = 'sea';
 			originalCoordinates = null;
 		}
 	};
