@@ -1,27 +1,17 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { getEnv } from '$lib/env';
 import type { Node } from '$lib/schedule';
 
 let _db: DatabaseSync | null = null;
+let _data: StatementSync | null;
 
 const getDb = () => {
 	if (!_db) {
 		const path = getEnv('VITE_DESTINATIONS_DATABASE_PATH');
 		_db = new DatabaseSync(path);
 	}
-
-	return _db;
-};
-
-export interface EnrichedNode extends Node {
-	population: number;
-	numberOfMuseums: number;
-}
-
-export const enrichNodes = (nodes: Node[]): EnrichedNode[] => {
-	const db = getDb();
-
-	const data = db.prepare(`
+	if (!_data) {
+		_data = _db.prepare(`
     WITH city AS (select sncf_id, population, COALESCE(postal_codes, json('[]')) AS postal_codes
     FROM t_nodes
     LEFT JOIN t_insee ON t_nodes.id = t_insee.node_id
@@ -31,19 +21,26 @@ export const enrichNodes = (nodes: Node[]): EnrichedNode[] => {
     LEFT JOIN json_each(city.postal_codes)
     LEFT JOIN t_museum ON t_museum.postal_code = value
     GROUP BY sncf_id;`);
-
-	const enrichedNodes: EnrichedNode[] = [];
-	for (const node of nodes) {
-		const res = data.get(node.id);
-		if (res === undefined) {
-			continue;
-		}
-		enrichedNodes.push({
-			...node,
-			population: res['population'] as number,
-			numberOfMuseums: res['museum'] as number
-		});
 	}
 
-	return enrichedNodes;
+	return { db: _db, data: _data };
+};
+
+export interface EnrichedNode extends Node {
+	population: number;
+	numberOfMuseums: number;
+}
+
+export const enrichNode = (node: Node): EnrichedNode | null => {
+	const { data } = getDb();
+
+	const res = data.get(node.id);
+	if (res === undefined) {
+		return null;
+	}
+	return {
+		...node,
+		population: res['population'] as number,
+		numberOfMuseums: res['museum'] as number
+	};
 };

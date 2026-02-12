@@ -3,11 +3,11 @@
 	import { displayDuration } from '$lib';
 	import type { Station } from '$lib/station.remote';
 	import type { Trip } from '$lib/server/graph';
-	import type { Node } from '$lib/schedule';
 	import TripsMap from './TripsMap.svelte';
+	import type { EnrichedNode } from '$lib/server/destinations';
 
 	export interface Destination {
-		node: Node;
+		node: EnrichedNode;
 		trip: Trip;
 	}
 

@@ -1,6 +1,7 @@
 import { getEdgesAndNodes, type Graph } from '$lib/api/schedule';
 import type { Edge, Node } from '$lib/schedule';
 import dayjs from 'dayjs';
+import { enrichNode, type EnrichedNode } from './destinations';
 
 const graphs: Map<string, Graph> = new Map();
 
@@ -76,7 +77,7 @@ export const findDestinations = async (
 	origin: string,
 	from: dayjs.Dayjs,
 	filters: DestinationsFilters
-): Promise<{ node: Node; trip: Trip }[]> => {
+): Promise<{ node: EnrichedNode; trip: Trip }[]> => {
 	const graph = await getGraph(from);
 	const maxLegs = filters.maxConnections < 3 ? filters.maxConnections + 1 : 3;
 
@@ -93,9 +94,10 @@ export const findDestinations = async (
 		.filter((trip) => trip.legs.length > 0)
 		.map(internalTripToTrip);
 
-	return deduplicateTripsByDestination(trips, graph.nodes).filter(
-		({ trip }) => trip.duration >= filters.minDuration
-	);
+	return deduplicateTripsByDestination(trips, graph.nodes)
+		.filter(({ trip }) => trip.duration >= filters.minDuration)
+		.map(({ node, trip }) => ({ node: enrichNode(node), trip }))
+		.filter((dest): dest is { node: EnrichedNode; trip: Trip } => dest.node !== null);
 };
 
 const findTrips = (

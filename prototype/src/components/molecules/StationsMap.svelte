@@ -38,7 +38,6 @@
 
 	$effect(() => {
 		if (map === undefined) {
-			console.log(mapElement);
 			map = leaflet.map(mapElement);
 			leaflet
 				.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
