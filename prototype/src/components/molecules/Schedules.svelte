@@ -1,7 +1,7 @@
 <script lang="ts">
 	import dayjs from 'dayjs';
 	import StationSelect from './StationSelect.svelte';
-	import type { Station } from '$lib/station.remote';
+	import type { Station } from '$lib/remote/station.remote';
 	import { fetchDestinationsQuery } from '$lib/remote/graph.remote';
 	import TripsResults from './TripsResults.svelte';
 	import DurationRange from '../atoms/DurationRange.svelte';

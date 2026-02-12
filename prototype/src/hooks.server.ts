@@ -1,7 +1,6 @@
 import { fetchLines } from '$lib/api/lines';
 import { getDb, initDB } from '$lib/server/db';
 import type { ServerInit } from '@sveltejs/kit';
-import Lines from './components/molecules/Lines.svelte';
 
 export const init: ServerInit = async () => {
 	const db = getDb();
@@ -18,7 +17,7 @@ export const init: ServerInit = async () => {
 		for (const line of lines) {
 			insert.run(line.id, line.name, line.direction);
 		}
-		console.log(`${Lines.length} lines loaded in database`);
+		console.log(`${lines.length} lines loaded in database`);
 	} else {
 		console.log(`${n_lines} lines already loaded in database, skipping initialisation`);
 	}

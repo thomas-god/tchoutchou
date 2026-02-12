@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { autocompleteStation, type Station } from '$lib/station.remote';
+	import { autocompleteStation, type Station } from '$lib/remote/station.remote';
 
 	let { station = $bindable(), label }: { station: Station | undefined; label: string } = $props();
 

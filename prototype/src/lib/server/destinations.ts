@@ -1,6 +1,6 @@
 import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { getEnv } from '$lib/env';
-import type { Node } from '$lib/schedule';
+import type { Node } from '$lib/api/schedule';
 
 let _db: DatabaseSync | null = null;
 let _data: StatementSync | null;

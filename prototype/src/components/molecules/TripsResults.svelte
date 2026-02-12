@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
 	import { displayDuration } from '$lib';
-	import type { Station } from '$lib/station.remote';
 	import type { Trip } from '$lib/server/graph';
 	import TripsMap from './TripsMap.svelte';
 	import type { EnrichedNode } from '$lib/server/destinations';
+	import type { Station } from '$lib/remote/station.remote';
 
 	export interface Destination {
 		node: EnrichedNode;

@@ -1,5 +1,5 @@
 import { query } from '$app/server';
-import type { Node } from '$lib/schedule';
+import type { Node } from '$lib/api/schedule';
 import { findDestinations, getGraph } from '$lib/server/graph';
 import dayjs from 'dayjs';
 
