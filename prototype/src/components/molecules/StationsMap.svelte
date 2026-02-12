@@ -10,7 +10,7 @@
 		id: string;
 		name: string;
 		category: 'sea' | 'mountain';
-		coordinates: any; // GeoJSON-compatible coordinates
+		coordinates: { lat: number; lng: number }[];
 	}
 
 	interface Props {
@@ -37,6 +37,7 @@
 	let editingZoneId: string | null = $state(null);
 	let editingName = $state('');
 	let editingCategory = $state<'sea' | 'mountain'>('sea');
+	let originalCoordinates: any = $state(null);
 
 	let bounds = $derived({
 		lat: {
@@ -71,7 +72,13 @@
 						'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 				})
 				.addTo(map);
+
+			// Draw markers for each station
 			map.addLayer(markersLayer);
+			markersLayer.clearLayers();
+			for (const { marker } of markers) {
+				markersLayer.addLayer(marker);
+			}
 
 			// Add edit controls only (no drawing controls by default)
 			map.pm.addControls({
@@ -83,12 +90,13 @@
 				drawRectangle: false,
 				drawCircle: false,
 				drawText: false,
+				editControls: false,
 				rotateMode: false
 			});
 
 			map.on('pm:create', (e: any) => {
 				const layer = e.layer;
-				const coordinates = layer.getLatLngs();
+				const coordinates = layer.getLatLngs()[0];
 
 				// Create new zone with core data only
 				const zoneId = crypto.randomUUID();
@@ -102,7 +110,6 @@
 				// Store zone data and layer separately
 				zones = [...zones, zone];
 				zoneLayers.set(zoneId, layer);
-				console.log('Zone saved:', zone);
 
 				// Reset form and stop drawing mode
 				newZoneName = '';
@@ -110,24 +117,6 @@
 				isDrawing = false;
 				map.pm.disableDraw();
 			});
-
-			map.on('pm:edit', (e: any) => {
-				const layer = e.layer;
-				const coordinates = layer.getLatLngs();
-
-				// Find and update the zone with matching layer
-				const zoneId = Array.from(zoneLayers.entries()).find(([_, l]) => l === layer)?.[0];
-				if (zoneId) {
-					zones = zones.map((z) => (z.id === zoneId ? { ...z, coordinates } : z));
-					console.log('Zone coordinates updated:', zoneId);
-				}
-			});
-		}
-
-		markersLayer.clearLayers();
-
-		for (const { marker } of markers) {
-			markersLayer.addLayer(marker);
 		}
 
 		if (stations.length > 0) {
@@ -180,6 +169,9 @@
 			editingZoneId = id;
 			editingName = zone.name;
 			editingCategory = zone.category;
+			// Store original coordinates for potential rollback
+			originalCoordinates = JSON.parse(JSON.stringify(zone.coordinates));
+
 			layer.pm.enable();
 		}
 	};
@@ -188,20 +180,39 @@
 		if (editingZoneId) {
 			const layer = zoneLayers.get(editingZoneId);
 			if (layer) {
+				// Revert to original coordinates
+				if (originalCoordinates) {
+					layer.setLatLngs(originalCoordinates);
+				}
 				layer.pm.disable();
 			}
 			editingZoneId = null;
 			editingName = '';
 			editingCategory = 'sea';
+			originalCoordinates = null;
 		}
 	};
 
 	const saveZoneEdit = () => {
 		if (editingZoneId) {
+			const layer = zoneLayers.get(editingZoneId);
+			// Get current coordinates directly from the layer
+			const currentCoordinates = layer ? layer.getLatLngs()[0] : null;
+
+			// Save all changes including coordinates
 			zones = zones.map((z) =>
-				z.id === editingZoneId ? { ...z, name: editingName, category: editingCategory } : z
+				z.id === editingZoneId
+					? { ...z, name: editingName, category: editingCategory, coordinates: currentCoordinates }
+					: z
 			);
-			stopEditingZone();
+
+			if (layer) {
+				layer.pm.disable();
+			}
+			editingZoneId = null;
+			editingName = '';
+			editingCategory = 'sea';
+			originalCoordinates = null;
 		}
 	};
 
