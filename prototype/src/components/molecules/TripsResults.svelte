@@ -37,6 +37,16 @@
 						<h3 class="text-md font-semibold">{destination.node.name}</h3>
 						<p class="text-xs italic">
 							{displayDuration(destination.trip.duration)}
+							{#if destination.node.population}
+								<span>
+									. {destination.node.population.toLocaleString('fr-FR')} hab
+								</span>
+							{/if}
+							{#if destination.node.numberOfMuseums}
+								<span>
+									. {destination.node.numberOfMuseums.toLocaleString('fr-FR')} museum(s)
+								</span>
+							{/if}
 						</p>
 					</button>
 				</div>

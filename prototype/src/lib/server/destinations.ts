@@ -27,8 +27,8 @@ const getDb = () => {
 };
 
 export interface EnrichedNode extends Node {
-	population: number;
-	numberOfMuseums: number;
+	population: number | null;
+	numberOfMuseums: number | null;
 }
 
 export const enrichNode = (node: Node): EnrichedNode | null => {
