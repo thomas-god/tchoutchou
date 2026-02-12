@@ -85,3 +85,22 @@ export const upsertZone = (zone: Zone) => {
 		throw error;
 	}
 };
+
+export const getZones = (): Zone[] => {
+	const { db } = getDb();
+
+	const stmt = db.prepare('SELECT category, name, geopoly_json(_shape) as shape FROM t_zones');
+	const rows = stmt.all();
+
+	return rows.map((row) => {
+		const coords = JSON.parse(row.shape as string) as [number, number][];
+		// Remove the last coordinate (duplicate of first, used to close the polygon)
+		coords.pop();
+
+		return {
+			category: row.category as ZoneCategory,
+			name: row.name as string,
+			coordinates: coords.map(([lng, lat]) => ({ lat, lng }))
+		};
+	});
+}

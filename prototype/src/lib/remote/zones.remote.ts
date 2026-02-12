@@ -1,5 +1,5 @@
-import { command } from '$app/server';
-import { upsertZone, zoneCategories } from '$lib/server/destinations';
+import { command, query } from '$app/server';
+import { getZones, upsertZone, zoneCategories, type Zone } from '$lib/server/destinations';
 import z from 'zod';
 
 const schema = z.object({
@@ -12,6 +12,10 @@ const schema = z.object({
 		})
 	)
 });
+
+export const fetchZones = query(async (): Promise<Zone[]> => {
+	return getZones()
+})
 
 export const insertZone = command(schema, async (zone) => {
 	upsertZone(zone);

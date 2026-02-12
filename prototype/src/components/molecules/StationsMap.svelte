@@ -5,7 +5,7 @@
 	import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 	import type { Node } from '$lib/api/schedule';
 	import type { Zone } from '$lib/server/destinations';
-	import { insertZone } from '$lib/remote/zones.remote';
+	import { insertZone, fetchZones } from '$lib/remote/zones.remote';
 
 	interface Props {
 		stations: Node[];
@@ -74,6 +74,24 @@
 				markersLayer.addLayer(marker);
 			}
 
+			// Load existing zones
+			fetchZones().then((loadedZones) => {
+				zones = loadedZones;
+				// Render loaded zones on the map
+				for (const zone of loadedZones) {
+					const layer = leaflet
+						.polygon(
+							zone.coordinates.map((c) => [c.lat, c.lng]),
+							{
+								color: zone.category === 'sea' ? '#3b82f6' : '#8b5cf6',
+								fillOpacity: 0.2
+							}
+						)
+						.addTo(map);
+					zoneLayers.set(zoneId(zone), layer);
+				}
+			});
+
 			// Add edit controls only (no drawing controls by default)
 			map.pm.addControls({
 				position: 'topleft',
@@ -98,6 +116,12 @@
 					category: newZoneCategory,
 					coordinates: coordinates.map((coord: any) => ({ lat: coord.lat, lng: coord.lng }))
 				};
+
+				// Apply styling based on category
+				layer.setStyle({
+					color: zone.category === 'sea' ? '#3b82f6' : '#8b5cf6',
+					fillOpacity: 0.2
+				});
 
 				// Store zone data and layer separately
 				zones = [...zones, zone];
