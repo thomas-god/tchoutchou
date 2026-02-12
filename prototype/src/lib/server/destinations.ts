@@ -103,4 +103,4 @@ export const getZones = (): Zone[] => {
 			coordinates: coords.map(([lng, lat]) => ({ lat, lng }))
 		};
 	});
-}
+};

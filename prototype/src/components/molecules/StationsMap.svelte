@@ -33,6 +33,9 @@
 	let editingCategory = $state<'sea' | 'mountain'>('sea');
 	let originalCoordinates: any = $state(null);
 
+	// Hover state
+	let hoveredZoneId: string | null = $state(null);
+
 	let bounds = $derived({
 		lat: {
 			min: Math.min(...stations.map((node) => node.lat)),
@@ -84,7 +87,8 @@
 							zone.coordinates.map((c) => [c.lat, c.lng]),
 							{
 								color: zone.category === 'sea' ? '#3b82f6' : '#8b5cf6',
-								fillOpacity: 0.2
+								fillOpacity: 0.2,
+								weight: 2
 							}
 						)
 						.addTo(map);
@@ -120,7 +124,8 @@
 				// Apply styling based on category
 				layer.setStyle({
 					color: zone.category === 'sea' ? '#3b82f6' : '#8b5cf6',
-					fillOpacity: 0.2
+					fillOpacity: 0.2,
+					weight: 2
 				});
 
 				// Store zone data and layer separately
@@ -145,6 +150,28 @@
 	});
 
 	const zoneId = (zone: Zone): string => `${zone.category}-${zone.name}`;
+
+	const handleZoneHover = (id: string) => {
+		hoveredZoneId = id;
+		const layer = zoneLayers.get(id);
+		if (layer) {
+			layer.setStyle({
+				fillOpacity: 0.5,
+				weight: 3
+			});
+		}
+	};
+
+	const handleZoneUnhover = (id: string) => {
+		hoveredZoneId = null;
+		const layer = zoneLayers.get(id);
+		if (layer) {
+			layer.setStyle({
+				fillOpacity: 0.2,
+				weight: 2
+			});
+		}
+	};
 
 	const startDrawing = () => {
 		if (map && !isDrawing) {
@@ -305,7 +332,13 @@
 			<h4 class="mb-2 font-semibold">Saved Zones ({zones.length})</h4>
 			<div class="space-y-2">
 				{#each zones as zone (zoneId(zone))}
-					<div class="card bg-base-100 p-2 shadow-sm">
+					<div
+						class="card cursor-pointer bg-base-100 p-2 shadow-sm transition-all"
+						class:ring-2={hoveredZoneId === zoneId(zone)}
+						class:ring-primary={hoveredZoneId === zoneId(zone)}
+						onmouseenter={() => handleZoneHover(zoneId(zone))}
+						onmouseleave={() => handleZoneUnhover(zoneId(zone))}
+					>
 						{#if editingZoneId === zoneId(zone)}
 							<!-- Editing mode -->
 							<div class="space-y-2">

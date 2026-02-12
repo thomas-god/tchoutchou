@@ -14,8 +14,8 @@ const schema = z.object({
 });
 
 export const fetchZones = query(async (): Promise<Zone[]> => {
-	return getZones()
-})
+	return getZones();
+});
 
 export const insertZone = command(schema, async (zone) => {
 	upsertZone(zone);
