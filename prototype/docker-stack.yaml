@@ -13,6 +13,7 @@ services:
     environment:
       VITE_API_KEY_FILE: /run/secrets/tchoutchou_api_key
       VITE_DATABASE_PATH: /data/tchoutchou.db
+      VITE_DESTINATIONS_DATABASE_PATH: /data/nodes.db
       VITE_DATA_PATH: /data
 
     networks:
