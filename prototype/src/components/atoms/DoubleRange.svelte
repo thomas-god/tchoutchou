@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { displayDuration } from '$lib';
-
 	export interface Range {
 		min: number;
 		max: number;
@@ -9,8 +7,9 @@
 	let {
 		range,
 		selection = $bindable(),
-		step
-	}: { range: Range; selection: Range; step: number } = $props();
+		step,
+		fmt
+	}: { range: Range; selection: Range; step: number; fmt: (val: number) => string } = $props();
 	let min = $derived(Math.max(0, Math.floor(range.min / step) * step));
 	let max = $derived(Math.ceil(range.max / step) * step);
 
@@ -93,8 +92,8 @@
 	</div>
 
 	<div class="flex justify-between text-sm">
-		<span>{displayDuration(selection.min)}</span>
-		<span>{displayDuration(selection.max)}</span>
+		<span>{fmt(selection.min)}</span>
+		<span>{fmt(selection.max)}</span>
 	</div>
 </div>
 

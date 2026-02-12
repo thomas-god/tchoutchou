@@ -4,7 +4,8 @@
 	import type { Station } from '$lib/remote/station.remote';
 	import { fetchDestinationsQuery } from '$lib/remote/graph.remote';
 	import TripsResults from './TripsResults.svelte';
-	import DurationRange from '../atoms/DurationRange.svelte';
+	import DoubleRange from '../atoms/DoubleRange.svelte';
+	import { displayDuration } from '$lib';
 
 	const today = dayjs();
 	const nextWeek = today.add(1, 'week');
@@ -59,10 +60,11 @@
 			<div class="flex max-w-90 flex-col items-start gap-2">
 				<p class="text-sm font-semibold">Durée du trajet</p>
 				<div class="w-full">
-					<DurationRange
+					<DoubleRange
 						range={{ min: 0, max: maxDurationUpperBound }}
 						bind:selection={durationRange}
 						step={1800}
+						fmt={displayDuration}
 					/>
 				</div>
 			</div>
