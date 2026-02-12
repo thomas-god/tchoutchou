@@ -32,8 +32,6 @@
 	let editingName = $state('');
 	let editingCategory = $state<'sea' | 'mountain'>('sea');
 	let originalCoordinates: any = $state(null);
-	let originalName = $state('');
-	let originalCategory = $state<'sea' | 'mountain'>('sea');
 
 	// Hover state
 	let hoveredZoneId: string | null = $state(null);
@@ -94,7 +92,7 @@
 							}
 						)
 						.addTo(map);
-					zoneLayers.set(zoneId(zone), layer);
+					zoneLayers.set(zone.id, layer);
 				}
 			});
 
@@ -118,6 +116,7 @@
 
 				// Create new zone with core data only
 				const zone: Zone = {
+					id: crypto.randomUUID(),
 					name: newZoneName,
 					category: newZoneCategory,
 					coordinates: coordinates.map((coord: any) => ({ lat: coord.lat, lng: coord.lng }))
@@ -132,7 +131,7 @@
 
 				// Store zone data and layer separately
 				zones = [...zones, zone];
-				zoneLayers.set(zoneId(zone), layer);
+				zoneLayers.set(zone.id, layer);
 
 				// Reset form and stop drawing mode
 				newZoneName = '';
@@ -150,8 +149,6 @@
 			]);
 		}
 	});
-
-	const zoneId = (zone: Zone): string => `${zone.category}-${zone.name}`;
 
 	const handleZoneHover = (id: string) => {
 		hoveredZoneId = id;
@@ -192,7 +189,7 @@
 	};
 
 	const removeZone = (id: string) => {
-		const zone = zones.find((z) => zoneId(z) === id);
+		const zone = zones.find((z) => z.id === id);
 		if (!zone) return;
 
 		const layer = zoneLayers.get(id);
@@ -200,7 +197,7 @@
 			map.removeLayer(layer);
 			zoneLayers.delete(id);
 		}
-		zones = zones.filter((z) => zoneId(z) !== id);
+		zones = zones.filter((z) => z.id !== id);
 		if (editingZoneId === id) {
 			editingZoneId = null;
 			editingName = '';
@@ -208,11 +205,11 @@
 		}
 
 		// Delete from database
-		deleteZoneRemote({ category: zone.category, name: zone.name });
+		deleteZoneRemote({ id: zone.id! });
 	};
 
 	const startEditingZone = (id: string) => {
-		const zone = zones.find((z) => zoneId(z) === id);
+		const zone = zones.find((z) => z.id === id);
 		const layer = zoneLayers.get(id);
 		if (zone && layer) {
 			// Stop any current editing
@@ -223,12 +220,10 @@
 			editingZoneId = id;
 			editingName = zone.name;
 			editingCategory = zone.category;
-			// Store original values for comparison and rollback
-			originalName = zone.name;
-			originalCategory = zone.category;
+			// Store original coordinates for comparison and rollback
 			originalCoordinates = JSON.parse(JSON.stringify(zone.coordinates));
 
-			layer.pm.enable();
+			layer.pm.enable({ snappable: false });
 		}
 	};
 
@@ -245,8 +240,6 @@
 			editingZoneId = null;
 			editingName = '';
 			editingCategory = 'sea';
-			originalName = '';
-			originalCategory = 'sea';
 			originalCoordinates = null;
 		}
 	};
@@ -257,18 +250,9 @@
 			// Get current coordinates directly from the layer
 			const currentCoordinates = layer ? layer.getLatLngs()[0] : null;
 
-			// Check if name or category changed
-			const nameOrCategoryChanged =
-				editingName !== originalName || editingCategory !== originalCategory;
-
-			// If name or category changed, delete the old zone from database
-			if (nameOrCategoryChanged) {
-				deleteZoneRemote({ category: originalCategory, name: originalName });
-			}
-
 			// Save all changes including coordinates
 			zones = zones.map((z) =>
-				zoneId(z) === editingZoneId
+				z.id === editingZoneId
 					? {
 							...z,
 							name: editingName,
@@ -281,8 +265,8 @@
 					: z
 			);
 
-			// Insert/update the zone in database
-			const zone = zones.find((z) => zoneId(z) === editingZoneId)!;
+			// Update the zone in database
+			const zone = zones.find((z) => z.id === editingZoneId)!;
 			insertZone(zone);
 
 			if (layer) {
@@ -291,8 +275,6 @@
 			editingZoneId = null;
 			editingName = '';
 			editingCategory = 'sea';
-			originalName = '';
-			originalCategory = 'sea';
 			originalCoordinates = null;
 		}
 	};
@@ -354,15 +336,15 @@
 		<div>
 			<h4 class="mb-2 font-semibold">Saved Zones ({zones.length})</h4>
 			<div class="space-y-2">
-				{#each zones as zone (zoneId(zone))}
+				{#each zones as zone (zone.id)}
 					<div
 						class="card cursor-pointer bg-base-100 p-2 shadow-sm transition-all"
-						class:ring-2={hoveredZoneId === zoneId(zone)}
-						class:ring-primary={hoveredZoneId === zoneId(zone)}
-						onmouseenter={() => handleZoneHover(zoneId(zone))}
-						onmouseleave={() => handleZoneUnhover(zoneId(zone))}
+						class:ring-2={hoveredZoneId === zone.id}
+						class:ring-primary={hoveredZoneId === zone.id}
+						onmouseenter={() => handleZoneHover(zone.id!)}
+						onmouseleave={() => handleZoneUnhover(zone.id!)}
 					>
-						{#if editingZoneId === zoneId(zone)}
+						{#if editingZoneId === zone.id}
 							<!-- Editing mode -->
 							<div class="space-y-2">
 								<select
@@ -399,14 +381,14 @@
 								</div>
 								<div class="flex gap-1">
 									<button
-										onclick={() => startEditingZone(zoneId(zone))}
+										onclick={() => startEditingZone(zone.id!)}
 										class="btn btn-ghost btn-xs"
 										title="Edit zone"
 									>
 										✏️
 									</button>
 									<button
-										onclick={() => removeZone(zoneId(zone))}
+										onclick={() => removeZone(zone.id!)}
 										class="btn btn-ghost btn-xs"
 										title="Delete zone"
 									>

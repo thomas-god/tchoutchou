@@ -25,7 +25,7 @@ const getDb = () => {
 
 	_db.exec(`
 		CREATE VIRTUAL TABLE IF NOT EXISTS t_zones
-		USING geopoly(category, name);
+		USING geopoly(id, category, name);
 		`);
 
 	return { db: _db, data: _data };
@@ -54,6 +54,7 @@ export const enrichNode = (node: Node): EnrichedNode | null => {
 export const zoneCategories = ['sea', 'mountain'] as const;
 export type ZoneCategory = (typeof zoneCategories)[number];
 export interface Zone {
+	id: string;
 	name: string;
 	category: ZoneCategory;
 	coordinates: { lat: number; lng: number }[];
@@ -70,11 +71,12 @@ export const upsertZone = (zone: Zone) => {
 	db.exec('BEGIN TRANSACTION');
 	try {
 		// Delete existing if present
-		db.prepare('DELETE FROM t_zones WHERE category = ? AND name = ?').run(zone.category, zone.name);
+		db.prepare('DELETE FROM t_zones WHERE id = ?').run(zone.id);
 
 		// Insert new
-		db.prepare('INSERT INTO t_zones (_shape, category, name) VALUES (?, ?, ?)').run(
+		db.prepare('INSERT INTO t_zones (_shape, id, category, name) VALUES (?, ?, ?, ?)').run(
 			shape,
+			zone.id,
 			zone.category,
 			zone.name
 		);
@@ -89,7 +91,7 @@ export const upsertZone = (zone: Zone) => {
 export const getZones = (): Zone[] => {
 	const { db } = getDb();
 
-	const stmt = db.prepare('SELECT category, name, geopoly_json(_shape) as shape FROM t_zones');
+	const stmt = db.prepare('SELECT id, category, name, geopoly_json(_shape) as shape FROM t_zones');
 	const rows = stmt.all();
 
 	return rows.map((row) => {
@@ -98,6 +100,7 @@ export const getZones = (): Zone[] => {
 		coords.pop();
 
 		return {
+			id: row.id as string,
 			category: row.category as ZoneCategory,
 			name: row.name as string,
 			coordinates: coords.map(([lng, lat]) => ({ lat, lng }))
@@ -105,7 +108,8 @@ export const getZones = (): Zone[] => {
 	});
 };
 
-export const deleteZone = (category: ZoneCategory, name: string) => {
+export const deleteZone = (id: string | undefined) => {
+	if (!id) throw new Error('Zone ID is required for deletion');
 	const { db } = getDb();
-	db.prepare('DELETE FROM t_zones WHERE category = ? AND name = ?').run(category, name);
+	db.prepare('DELETE FROM t_zones WHERE id = ?').run(id);
 };
