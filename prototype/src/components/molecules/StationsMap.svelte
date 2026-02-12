@@ -4,14 +4,8 @@
 	import '@geoman-io/leaflet-geoman-free';
 	import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 	import type { Node } from '$lib/api/schedule';
-
-	// Core zone data type (serializable)
-	interface Zone {
-		id: string;
-		name: string;
-		category: 'sea' | 'mountain';
-		coordinates: { lat: number; lng: number }[];
-	}
+	import type { Zone } from '$lib/server/destinations';
+	import { insertZone } from '$lib/remote/zones.remote';
 
 	interface Props {
 		stations: Node[];
@@ -99,23 +93,22 @@
 				const coordinates = layer.getLatLngs()[0];
 
 				// Create new zone with core data only
-				const zoneId = crypto.randomUUID();
 				const zone: Zone = {
-					id: zoneId,
-					name: newZoneName || 'Unnamed Zone',
+					name: newZoneName,
 					category: newZoneCategory,
-					coordinates
+					coordinates: coordinates.map((coord: any) => ({ lat: coord.lat, lng: coord.lng }))
 				};
 
 				// Store zone data and layer separately
 				zones = [...zones, zone];
-				zoneLayers.set(zoneId, layer);
+				zoneLayers.set(zoneId(zone), layer);
 
 				// Reset form and stop drawing mode
 				newZoneName = '';
 				newZoneCategory = 'sea';
 				isDrawing = false;
 				map.pm.disableDraw();
+				insertZone(zone);
 			});
 		}
 
@@ -126,6 +119,8 @@
 			]);
 		}
 	});
+
+	const zoneId = (zone: Zone): string => `${zone.category}-${zone.name}`;
 
 	const startDrawing = () => {
 		if (map && !isDrawing) {
@@ -149,7 +144,7 @@
 			map.removeLayer(layer);
 			zoneLayers.delete(id);
 		}
-		zones = zones.filter((z) => z.id !== id);
+		zones = zones.filter((z) => zoneId(z) !== id);
 		if (editingZoneId === id) {
 			editingZoneId = null;
 			editingName = '';
@@ -158,7 +153,7 @@
 	};
 
 	const startEditingZone = (id: string) => {
-		const zone = zones.find((z) => z.id === id);
+		const zone = zones.find((z) => zoneId(z) === id);
 		const layer = zoneLayers.get(id);
 		if (zone && layer) {
 			// Stop any current editing
@@ -201,10 +196,22 @@
 
 			// Save all changes including coordinates
 			zones = zones.map((z) =>
-				z.id === editingZoneId
-					? { ...z, name: editingName, category: editingCategory, coordinates: currentCoordinates }
+				zoneId(z) === editingZoneId
+					? {
+							...z,
+							name: editingName,
+							category: editingCategory,
+							coordinates: currentCoordinates.map((coord: any) => ({
+								lat: coord.lat,
+								lng: coord.lng
+							}))
+						}
 					: z
 			);
+
+			// TODO: if zone name has changed, we should delete the zone corresponding to the previous name
+			const zone = zones.find((z) => zoneId(z) === editingZoneId)!;
+			insertZone(zone);
 
 			if (layer) {
 				layer.pm.disable();
@@ -273,9 +280,9 @@
 		<div>
 			<h4 class="mb-2 font-semibold">Saved Zones ({zones.length})</h4>
 			<div class="space-y-2">
-				{#each zones as zone (zone.id)}
+				{#each zones as zone (zoneId(zone))}
 					<div class="card bg-base-100 p-2 shadow-sm">
-						{#if editingZoneId === zone.id}
+						{#if editingZoneId === zoneId(zone)}
 							<!-- Editing mode -->
 							<div class="space-y-2">
 								<select
@@ -312,14 +319,14 @@
 								</div>
 								<div class="flex gap-1">
 									<button
-										onclick={() => startEditingZone(zone.id)}
+										onclick={() => startEditingZone(zoneId(zone))}
 										class="btn btn-ghost btn-xs"
 										title="Edit zone"
 									>
 										✏️
 									</button>
 									<button
-										onclick={() => removeZone(zone.id)}
+										onclick={() => removeZone(zoneId(zone))}
 										class="btn btn-ghost btn-xs"
 										title="Delete zone"
 									>

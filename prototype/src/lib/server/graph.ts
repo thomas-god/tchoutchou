@@ -1,5 +1,4 @@
-import { getEdgesAndNodes, type Graph } from '$lib/api/schedule';
-import type { Edge, Node } from '$lib/schedule';
+import { getEdgesAndNodes, type Graph, type Edge, type Node } from '$lib/api/schedule';
 import dayjs from 'dayjs';
 import { enrichNode, type EnrichedNode } from './destinations';
 

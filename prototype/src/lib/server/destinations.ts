@@ -23,6 +23,11 @@ const getDb = () => {
     GROUP BY sncf_id;`);
 	}
 
+	_db.exec(`
+		CREATE VIRTUAL TABLE IF NOT EXISTS t_zones
+		USING geopoly(category, name);
+		`);
+
 	return { db: _db, data: _data };
 };
 
@@ -43,4 +48,40 @@ export const enrichNode = (node: Node): EnrichedNode | null => {
 		population: res['population'] as number,
 		numberOfMuseums: res['museum'] as number
 	};
+};
+
+// Core zone data type (serializable)
+export const zoneCategories = ['sea', 'mountain'] as const;
+export type ZoneCategory = (typeof zoneCategories)[number];
+export interface Zone {
+	name: string;
+	category: ZoneCategory;
+	coordinates: { lat: number; lng: number }[];
+}
+
+export const upsertZone = (zone: Zone) => {
+	const { db } = getDb();
+
+	// Convert coordinates to geopoly JSON format [[lng, lat], ...] and close the polygon
+	const coords = zone.coordinates.map((c) => [c.lng, c.lat]);
+	coords.push(coords[0]); // Close the polygon
+	const shape = JSON.stringify(coords);
+
+	db.exec('BEGIN TRANSACTION');
+	try {
+		// Delete existing if present
+		db.prepare('DELETE FROM t_zones WHERE category = ? AND name = ?').run(zone.category, zone.name);
+
+		// Insert new
+		db.prepare('INSERT INTO t_zones (_shape, category, name) VALUES (?, ?, ?)').run(
+			shape,
+			zone.category,
+			zone.name
+		);
+
+		db.exec('COMMIT');
+	} catch (error) {
+		db.exec('ROLLBACK');
+		throw error;
+	}
 };
