@@ -5,7 +5,7 @@
 	import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 	import type { Node } from '$lib/api/schedule';
 	import type { Zone } from '$lib/server/destinations';
-	import { insertZone, fetchZones } from '$lib/remote/zones.remote';
+	import { insertZone, fetchZones, removeZone as deleteZoneRemote } from '$lib/remote/zones.remote';
 
 	interface Props {
 		stations: Node[];
@@ -190,6 +190,9 @@
 	};
 
 	const removeZone = (id: string) => {
+		const zone = zones.find((z) => zoneId(z) === id);
+		if (!zone) return;
+
 		const layer = zoneLayers.get(id);
 		if (layer) {
 			map.removeLayer(layer);
@@ -201,6 +204,9 @@
 			editingName = '';
 			editingCategory = 'sea';
 		}
+
+		// Delete from database
+		deleteZoneRemote({ category: zone.category, name: zone.name });
 	};
 
 	const startEditingZone = (id: string) => {

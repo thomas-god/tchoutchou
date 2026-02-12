@@ -104,3 +104,8 @@ export const getZones = (): Zone[] => {
 		};
 	});
 };
+
+export const deleteZone = (category: ZoneCategory, name: string) => {
+	const { db } = getDb();
+	db.prepare('DELETE FROM t_zones WHERE category = ? AND name = ?').run(category, name);
+};

@@ -1,5 +1,5 @@
 import { command, query } from '$app/server';
-import { getZones, upsertZone, zoneCategories, type Zone } from '$lib/server/destinations';
+import { getZones, upsertZone, deleteZone, zoneCategories, type Zone } from '$lib/server/destinations';
 import z from 'zod';
 
 const schema = z.object({
@@ -13,10 +13,19 @@ const schema = z.object({
 	)
 });
 
+const deleteSchema = z.object({
+	category: z.enum(zoneCategories),
+	name: z.string()
+});
+
 export const fetchZones = query(async (): Promise<Zone[]> => {
 	return getZones();
 });
 
 export const insertZone = command(schema, async (zone) => {
 	upsertZone(zone);
+});
+
+export const removeZone = command(deleteSchema, async ({ category, name }) => {
+	deleteZone(category, name);
 });
