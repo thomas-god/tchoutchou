@@ -58,7 +58,7 @@ const initZonesTables = (db: DatabaseSync) => {
 export interface EnrichedNode extends Node {
 	population: number | null;
 	numberOfMuseums: number | null;
-	zones: null | {categoy: string, name: string}[]
+	zones: null | { category: string; name: string }[];
 }
 
 export const enrichNode = (node: Node): EnrichedNode | null => {
@@ -72,7 +72,7 @@ export const enrichNode = (node: Node): EnrichedNode | null => {
 		...node,
 		population: res['population'] as number,
 		numberOfMuseums: res['museum'] as number,
-		zones: res["zones"] as any
+		zones: JSON.parse(res['zones'] as string) as any
 	};
 };
 

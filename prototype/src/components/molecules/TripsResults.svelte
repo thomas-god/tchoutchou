@@ -4,8 +4,10 @@
 	import type { Trip } from '$lib/server/graph';
 	import TripsMap from './TripsMap.svelte';
 	import type { EnrichedNode } from '$lib/server/destinations';
+	import { type ZoneCategory } from '$lib/server/destinations';
 	import type { Station } from '$lib/remote/station.remote';
 	import DoubleRange from '../atoms/DoubleRange.svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 
 	export interface Destination {
 		node: EnrichedNode;
@@ -18,9 +20,14 @@
 
 	let filteredDestinations = $derived(
 		destinations.filter(
-			(dest) => filterPopulation(dest.node.population) && filterMuseums(dest.node.numberOfMuseums)
+			(dest) =>
+				filterPopulation(dest.node.population) &&
+				filterMuseums(dest.node.numberOfMuseums) &&
+				filterZones(dest.node.zones)
 		)
 	);
+
+	export const zoneCategories = ['sea', 'mountain'] as const;
 
 	const filterPopulation = (pop: number | null): boolean => {
 		return pop === null
@@ -33,6 +40,15 @@
 			? true
 			: nbOfMuseums >= museumsRange.min &&
 					(museumsRange.max === maxMuseums ? true : nbOfMuseums <= museumsRange.max);
+	};
+	const filterZones = (zones: EnrichedNode['zones']): boolean => {
+		if (selectedZones.size === 0) {
+			return true;
+		}
+		if (!zones || zones.length === 0) {
+			return false;
+		}
+		return zones.some((zone) => selectedZones.has(zone.category as ZoneCategory));
 	};
 
 	let bounds = $derived({
@@ -50,6 +66,15 @@
 	let populationRange = $state({ min: 0, max: maxPop });
 	const maxMuseums = 10;
 	let museumsRange = $state({ min: 0, max: maxMuseums });
+	let selectedZones = $state<SvelteSet<ZoneCategory>>(new SvelteSet());
+
+	const toggleZone = (category: ZoneCategory) => {
+		if (selectedZones.has(category)) {
+			selectedZones.delete(category);
+		} else {
+			selectedZones.add(category);
+		}
+	};
 </script>
 
 <div class="@container flex flex-col gap-3 bg-base-300 p-3">
@@ -78,6 +103,19 @@
 					fmt={(val) => `${val.toLocaleString('fr-FR')}${val === maxMuseums ? '+' : ''}`}
 				/>
 			</div>
+		</div>
+	</div>
+	<div>
+		<h3>Zones</h3>
+		<div class="flex gap-2">
+			{#each zoneCategories as category}
+				<button
+					class="btn btn-sm {selectedZones.has(category) ? 'btn-primary' : 'btn-outline'}"
+					onclick={() => toggleZone(category)}
+				>
+					{category === 'sea' ? '🌊 Mer' : '⛰️ Montagne'}
+				</button>
+			{/each}
 		</div>
 	</div>
 	<div class="flex flex-col-reverse gap-3 @min-[500px]:max-h-112 @min-[500px]:flex-row">

@@ -49,7 +49,7 @@
 
 	const icon = leaflet.divIcon({
 		html: `
-			  <img src="/icons/station.svg" alt="Train station" class="w-3.5 h-3.5"/>
+			  <img src="/icons/station.svg" alt="Train station" class="w-3 h-3"/>
 			`
 	});
 	let markersLayer = new leaflet.LayerGroup();
