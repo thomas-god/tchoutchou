@@ -9,50 +9,56 @@ const getDb = () => {
 	if (!_db) {
 		const path = getEnv('VITE_DESTINATIONS_DATABASE_PATH');
 		_db = new DatabaseSync(path);
+		initZonesTables(_db);
 	}
 	if (!_data) {
 		_data = _db.prepare(`
-    WITH city AS (select sncf_id, population, COALESCE(postal_codes, json('[]')) AS postal_codes
+    WITH city AS (SELECT t_nodes.sncf_id, population, COALESCE(postal_codes, json('[]')) AS postal_codes
     FROM t_nodes
     LEFT JOIN t_insee ON t_nodes.id = t_insee.node_id
-    WHERE sncf_id = ?)
-    SELECT MAX(population) AS population, SUM(COALESCE(museum_count, 0)) AS museum
+    WHERE t_nodes.sncf_id = ?),
+		city_zones AS (
+			SELECT
+				sncf_id,
+				json_group_array(json_object('category', t_nodes_zones.category, 'name', t_nodes_zones.name)) AS zones
+			FROM t_nodes_zones
+			GROUP BY sncf_id
+		)
+    SELECT MAX(population) AS population, SUM(COALESCE(museum_count, 0)) AS museum, city_zones.zones
     FROM city
     LEFT JOIN json_each(city.postal_codes)
     LEFT JOIN t_museum ON t_museum.postal_code = value
-    GROUP BY sncf_id;`);
+		LEFT JOIN city_zones ON city_zones.sncf_id = city.sncf_id
+    GROUP BY city.sncf_id;`);
 	}
 
-	_db.exec(`
+	return { db: _db, data: _data };
+};
+
+const initZonesTables = (db: DatabaseSync) => {
+	db.exec(`
 		CREATE VIRTUAL TABLE IF NOT EXISTS t_zones
 		USING geopoly(id, category, name);
 		`);
 
-	_db.exec(`
-		CREATE VIEW IF NOT EXISTS v_nodes_zones AS
-		SELECT
-			sncf_id,
-			t_nodes.name AS gare,
-			json_group_array(
-				CASE
-					WHEN geopoly_contains_point(t_zones._shape, t_nodes.lon, t_nodes.lat) > 0 THEN json_object('category', t_zones.category, 'name', t_zones.name)
-					ELSE NULL
-				end
-			) FILTER( WHERE
-			 	CASE WHEN geopoly_contains_point(t_zones._shape, t_nodes.lon, t_nodes.lat) > 0 THEN json_object('category', t_zones.category, 'name', t_zones.name)
-				ELSE NULL end
-				IS NOT NULL ) AS zones
-		FROM t_nodes
-		FULL JOIN t_zones
-		GROUP BY sncf_id, gare;
-		`);
-
-	return { db: _db, data: _data };
+	// No explicit FK as t_zones is a virtual table and does not allow FK on it
+	// (as virtual table data are beyond the control of SQLite, so FK cannot be enforced).
+	// Referential integrity is thus enforced client-side in upsert and delete functions.
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS t_nodes_zones (
+			sncf_id TEXT,
+			zone_id TEXT,
+			category TEXT,
+			name TEXT,
+			PRIMARY KEY (sncf_id, zone_id)
+		);
+	`);
 };
 
 export interface EnrichedNode extends Node {
 	population: number | null;
 	numberOfMuseums: number | null;
+	zones: null | {categoy: string, name: string}[]
 }
 
 export const enrichNode = (node: Node): EnrichedNode | null => {
@@ -65,7 +71,8 @@ export const enrichNode = (node: Node): EnrichedNode | null => {
 	return {
 		...node,
 		population: res['population'] as number,
-		numberOfMuseums: res['museum'] as number
+		numberOfMuseums: res['museum'] as number,
+		zones: res["zones"] as any
 	};
 };
 
@@ -89,16 +96,34 @@ export const upsertZone = (zone: Zone) => {
 
 	db.exec('BEGIN TRANSACTION');
 	try {
-		// Delete existing if present
+		// Delete existing zone and its associations
 		db.prepare('DELETE FROM t_zones WHERE id = ?').run(zone.id);
+		db.prepare('DELETE FROM t_nodes_zones WHERE zone_id = ?').run(zone.id);
 
-		// Insert new
+		// Insert new zone
 		db.prepare('INSERT INTO t_zones (_shape, id, category, name) VALUES (?, ?, ?, ?)').run(
 			shape,
 			zone.id,
 			zone.category,
 			zone.name
 		);
+
+		// Update t_nodes_zones for nodes within this zone
+		const updateStmt = db.prepare(`
+			INSERT OR IGNORE INTO t_nodes_zones (sncf_id, zone_id, category, name)
+			SELECT
+				t_nodes.sncf_id,
+				?,
+				?,
+				?
+			FROM t_nodes
+			WHERE geopoly_contains_point(
+				(SELECT _shape FROM t_zones WHERE id = ?),
+				t_nodes.lon,
+				t_nodes.lat
+			) > 0
+		`);
+		updateStmt.run(zone.id, zone.category, zone.name, zone.id);
 
 		db.exec('COMMIT');
 	} catch (error) {
@@ -130,5 +155,16 @@ export const getZones = (): Zone[] => {
 export const deleteZone = (id: string | undefined) => {
 	if (!id) throw new Error('Zone ID is required for deletion');
 	const { db } = getDb();
-	db.prepare('DELETE FROM t_zones WHERE id = ?').run(id);
+
+	db.exec('BEGIN TRANSACTION');
+	try {
+		// Delete from t_nodes_zones first
+		db.prepare('DELETE FROM t_nodes_zones WHERE zone_id = ?').run(id);
+		// Then delete the zone itself
+		db.prepare('DELETE FROM t_zones WHERE id = ?').run(id);
+		db.exec('COMMIT');
+	} catch (error) {
+		db.exec('ROLLBACK');
+		throw error;
+	}
 };
