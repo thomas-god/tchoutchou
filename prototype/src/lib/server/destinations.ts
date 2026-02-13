@@ -28,6 +28,25 @@ const getDb = () => {
 		USING geopoly(id, category, name);
 		`);
 
+	_db.exec(`
+		CREATE VIEW IF NOT EXISTS v_nodes_zones AS
+		SELECT
+			sncf_id,
+			t_nodes.name AS gare,
+			json_group_array(
+				CASE
+					WHEN geopoly_contains_point(t_zones._shape, t_nodes.lon, t_nodes.lat) > 0 THEN json_object('category', t_zones.category, 'name', t_zones.name)
+					ELSE NULL
+				end
+			) FILTER( WHERE
+			 	CASE WHEN geopoly_contains_point(t_zones._shape, t_nodes.lon, t_nodes.lat) > 0 THEN json_object('category', t_zones.category, 'name', t_zones.name)
+				ELSE NULL end
+				IS NOT NULL ) AS zones
+		FROM t_nodes
+		FULL JOIN t_zones
+		GROUP BY sncf_id, gare;
+		`);
+
 	return { db: _db, data: _data };
 };
 
@@ -96,7 +115,7 @@ export const getZones = (): Zone[] => {
 
 	return rows.map((row) => {
 		const coords = JSON.parse(row.shape as string) as [number, number][];
-		// Remove the last coordinate (duplicate of first, used to close the polygon)
+		// Remove the last coordinate (duplicate of first, used to close the polygon for geopoly extension)
 		coords.pop();
 
 		return {
