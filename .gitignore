@@ -30,3 +30,6 @@ vite.config.ts.timestamp-*
 # Trips data
 *_edges.json
 *_nodes.json
+
+# Cargo
+/target
