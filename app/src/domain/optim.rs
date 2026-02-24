@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 use derive_more::{Constructor, From};
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, From)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, From)]
 pub struct StationId(usize);
 
 #[derive(Debug, Clone, PartialEq, Constructor)]
@@ -35,13 +35,35 @@ impl Default for DestinationFilters {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Destination {
     station: StationId,
     trips: Vec<Trip>,
     current_time: usize,
     duration: usize,
 }
+
+impl Ord for Destination {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.station
+            .cmp(&other.station)
+            .then(self.duration.cmp(&other.duration))
+    }
+}
+
+impl PartialOrd for Destination {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Destination {
+    fn eq(&self, other: &Self) -> bool {
+        self.station == other.station && self.duration == other.duration
+    }
+}
+
+impl Eq for Destination {}
 
 impl Destination {
     fn new(station: StationId, trips: Vec<Trip>) -> Self {
@@ -126,7 +148,7 @@ pub fn find_destinations(
         destinations.push(Destination::new(trip.destination, vec![trip.clone()]));
     }
 
-    find_new_destinations(graph, destinations, filters)
+    remove_duplicate_destinations(find_new_destinations(graph, destinations, filters))
 }
 
 fn find_new_destinations(
@@ -143,15 +165,25 @@ fn find_new_destinations(
     }
 
     if new_destinations.is_empty() {
-        return destinations;
+        destinations
     } else {
         destinations.extend(find_new_destinations(graph, new_destinations, filters));
-        return destinations;
+        destinations
     }
+}
+
+/// Keep trip with the shorter duration (see impl of `Ord` for `Destination`).
+fn remove_duplicate_destinations(mut destinations: Vec<Destination>) -> Vec<Destination> {
+    destinations.sort();
+    destinations.dedup_by(|a, b| a.station.eq(&b.station));
+
+    destinations
 }
 
 #[cfg(test)]
 mod test_find_destinations {
+    use pretty_assertions::assert_eq;
+
     use super::*;
 
     fn graph_with_one_trip() -> Graph {
@@ -287,36 +319,6 @@ mod test_find_destinations {
     }
 
     #[test]
-    fn test_find_destinations_same_destination_direct_and_with_connection() {
-        let origin = StationId::from(1);
-        let graph = graph_with_one_connection_and_one_direct();
-
-        let destinations = find_destinations(&origin, &graph, &DestinationFilters::default());
-
-        assert_eq!(destinations.len(), 3);
-        assert_eq!(
-            destinations,
-            vec![
-                Destination::new(
-                    StationId(2),
-                    vec![Trip::new(StationId(1), StationId(2), 100, 200)]
-                ),
-                Destination::new(
-                    StationId(3),
-                    vec![Trip::new(StationId(1), StationId(3), 100, 500),]
-                ),
-                Destination::new(
-                    StationId(3),
-                    vec![
-                        Trip::new(StationId(1), StationId(2), 100, 200),
-                        Trip::new(StationId(2), StationId(3), 1200, 1300)
-                    ]
-                )
-            ]
-        )
-    }
-
-    #[test]
     fn test_find_destinations_multiple_connections() {
         let origin = StationId::from(1);
         let graph = graph_with_2_connections();
@@ -348,6 +350,95 @@ mod test_find_destinations {
                 )
             ]
         )
+    }
+
+    #[test]
+    fn test_find_destinations_remove_duplicate_destination() {
+        let origin = StationId::from(1);
+        let graph = graph_with_one_connection_and_one_direct();
+
+        let destinations = find_destinations(&origin, &graph, &DestinationFilters::default());
+
+        assert_eq!(destinations.len(), 2);
+        assert_eq!(
+            destinations,
+            vec![
+                Destination::new(
+                    StationId(2),
+                    vec![Trip::new(StationId(1), StationId(2), 100, 200)]
+                ),
+                Destination::new(
+                    StationId(3),
+                    // Keep the fastest trips
+                    vec![Trip::new(StationId(1), StationId(3), 100, 500),]
+                ),
+            ]
+        )
+    }
+}
+
+#[cfg(test)]
+mod test_destination_ord {
+    use super::*;
+
+    #[test]
+    fn test_ord_different_stations() {
+        let a = Destination::new(
+            StationId(1),
+            vec![Trip::new(StationId(0), StationId(1), 100, 200)],
+        );
+        let b = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(0), StationId(2), 100, 200)],
+        );
+
+        assert!(a < b);
+        assert!(b > a);
+    }
+
+    #[test]
+    fn test_ord_same_station_different_duration() {
+        let short = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(1), StationId(2), 100, 200)],
+        );
+        let long = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(1), StationId(2), 100, 500)],
+        );
+
+        assert!(short < long);
+        assert!(long > short);
+    }
+
+    #[test]
+    fn test_ord_equal() {
+        let a = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(1), StationId(2), 100, 200)],
+        );
+        let b = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(1), StationId(2), 100, 200)],
+        );
+
+        assert_eq!(a.cmp(&b), Ordering::Equal);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_ord_station_takes_priority_over_duration() {
+        // Station 1 with long duration vs station 2 with short duration → station wins
+        let a = Destination::new(
+            StationId(1),
+            vec![Trip::new(StationId(0), StationId(1), 100, 500)],
+        );
+        let b = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(0), StationId(2), 100, 200)],
+        );
+
+        assert!(a < b);
     }
 }
 
