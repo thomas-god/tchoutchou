@@ -31,10 +31,60 @@ pub struct Graph {
     trips_by_nodes: HashMap<StationId, Vec<Trip>>,
 }
 
-#[derive(Debug, Clone, Constructor, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Destination {
     station: StationId,
     trips: Vec<Trip>,
+    current_time: usize,
+}
+
+impl Destination {
+    fn new(station: StationId, trips: Vec<Trip>) -> Self {
+        Self {
+            station,
+            current_time: trips
+                .iter()
+                .map(|trip| trip.arrival)
+                .max()
+                .unwrap_or_default(),
+            trips,
+        }
+    }
+
+    /// Try to connect a `Trip` to itself if compatible (same origin, compatible departure,
+    /// no loopback). Returns `None` if the trip is not compatible, otherwise `Some(Self)` with
+    /// the new extended destination.
+    fn try_connect_trip(&self, trip: &Trip) -> Option<Self> {
+        if self.station != trip.origin {
+            return None;
+        }
+
+        if self.trips.iter().any(|visitied| {
+            visitied.origin == trip.destination || visitied.destination == trip.destination
+        }) {
+            return None;
+        }
+
+        if trip.departure <= self.current_time {
+            return None;
+        }
+
+        let mut new_trips = self.trips.clone();
+        new_trips.push(trip.clone());
+
+        Some(Self {
+            station: trip.destination,
+            current_time: trip.arrival,
+            trips: new_trips,
+        })
+    }
+
+    fn find_connections_from(&self, trips: &[Trip]) -> Vec<Self> {
+        trips
+            .iter()
+            .filter_map(|trip| self.try_connect_trip(trip))
+            .collect()
+    }
 }
 
 pub fn find_destinations(origin: &StationId, graph: &Graph) -> Vec<Destination> {
@@ -54,15 +104,7 @@ pub fn find_destinations(origin: &StationId, graph: &Graph) -> Vec<Destination> 
     let mut new_destinations = vec![];
     for destination in destinations.iter() {
         if let Some(trips) = graph.trips_by_nodes.get(&destination.station) {
-            for trip in trips.iter().filter(|trip| {
-                destination.trips.iter().all(|station| {
-                    station.origin != trip.destination && station.destination != trip.destination
-                })
-            }) {
-                let mut new_trips = destination.trips.clone();
-                new_trips.push(trip.clone());
-                new_destinations.push(Destination::new(trip.destination, new_trips));
-            }
+            new_destinations.extend(destination.find_connections_from(trips));
         }
     }
 
@@ -370,6 +412,110 @@ mod test_find_destinations {
                         Trip::new(StationId(1), StationId(2), 100, 200),
                         Trip::new(StationId(2), StationId(3), 300, 600)
                     ]
+                )
+            ]
+        )
+    }
+}
+
+#[cfg(test)]
+mod test_destination_struct {
+    use super::*;
+
+    #[test]
+    fn test_try_connect_trip_to_destination_wrong_origin() {
+        let destination = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(1), StationId(2), 100, 300)],
+        );
+        let trip = Trip::new(StationId(3), StationId(4), 400, 500);
+
+        assert!(destination.try_connect_trip(&trip).is_none())
+    }
+
+    #[test]
+    fn test_try_connect_trip_to_destination_same_origin() {
+        let destination = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(1), StationId(2), 100, 300)],
+        );
+        let trip = Trip::new(StationId(2), StationId(4), 400, 500);
+
+        assert_eq!(
+            destination.try_connect_trip(&trip).unwrap(),
+            Destination::new(
+                StationId(4),
+                vec![
+                    Trip::new(StationId(1), StationId(2), 100, 300),
+                    Trip::new(StationId(2), StationId(4), 400, 500)
+                ],
+            )
+        )
+    }
+
+    #[test]
+    fn test_try_connect_trip_to_destination_origin_already_visited() {
+        let destination = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(1), StationId(2), 100, 300)],
+        );
+        let trip = Trip::new(StationId(2), StationId(1), 400, 500);
+
+        assert!(destination.try_connect_trip(&trip).is_none())
+    }
+
+    #[test]
+    fn test_try_connect_trip_to_destination_already_visited() {
+        let destination = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(1), StationId(2), 100, 300)],
+        );
+        let trip = Trip::new(StationId(2), StationId(2), 400, 500);
+
+        assert!(destination.try_connect_trip(&trip).is_none())
+    }
+
+    #[test]
+    fn test_try_connect_trip_to_destination_incompatible_departure() {
+        let destination = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(1), StationId(2), 100, 300)],
+        );
+        let trip = Trip::new(StationId(2), StationId(3), 300, 500);
+
+        assert!(destination.try_connect_trip(&trip).is_none())
+    }
+
+    #[test]
+    fn test_match_new_destinations() {
+        let destination = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(1), StationId(2), 100, 300)],
+        );
+        let trips = vec![
+            Trip::new(StationId(2), StationId(3), 400, 500),
+            Trip::new(StationId(2), StationId(4), 400, 500),
+            Trip::new(StationId(2), StationId(1), 400, 500),
+        ];
+
+        let new_destinations = destination.find_connections_from(&trips);
+
+        assert_eq!(
+            new_destinations,
+            vec![
+                Destination::new(
+                    StationId(3),
+                    vec![
+                        Trip::new(StationId(1), StationId(2), 100, 300),
+                        Trip::new(StationId(2), StationId(3), 400, 500)
+                    ],
+                ),
+                Destination::new(
+                    StationId(4),
+                    vec![
+                        Trip::new(StationId(1), StationId(2), 100, 300),
+                        Trip::new(StationId(2), StationId(4), 400, 500),
+                    ],
                 )
             ]
         )
