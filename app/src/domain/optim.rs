@@ -88,15 +88,24 @@ pub fn find_destinations(origin: &StationId, graph: &Graph) -> Vec<Destination> 
         destinations.push(Destination::new(trip.destination, vec![trip.clone()]));
     }
 
+    find_new_destinations(graph, destinations)
+}
+
+fn find_new_destinations(graph: &Graph, mut destinations: Vec<Destination>) -> Vec<Destination> {
     let mut new_destinations = vec![];
+
     for destination in destinations.iter() {
         if let Some(trips) = graph.trips_by_nodes.get(&destination.station) {
             new_destinations.extend(destination.find_connections_from(trips));
         }
     }
 
-    destinations.extend(new_destinations);
-    destinations
+    if new_destinations.is_empty() {
+        return destinations;
+    } else {
+        destinations.extend(find_new_destinations(graph, new_destinations));
+        return destinations;
+    }
 }
 
 #[cfg(test)]
@@ -151,6 +160,25 @@ mod test_find_destinations {
             (
                 StationId(2),
                 vec![Trip::new(StationId(2), StationId(3), 300, 600)],
+            ),
+        ]);
+
+        Graph::new(trips_by_nodes)
+    }
+
+    fn graph_with_2_connections() -> Graph {
+        let trips_by_nodes = HashMap::from_iter(vec![
+            (
+                StationId(1),
+                vec![Trip::new(StationId(1), StationId(2), 100, 200)],
+            ),
+            (
+                StationId(2),
+                vec![Trip::new(StationId(2), StationId(3), 300, 500)],
+            ),
+            (
+                StationId(3),
+                vec![Trip::new(StationId(3), StationId(4), 600, 700)],
             ),
         ]);
 
@@ -240,6 +268,40 @@ mod test_find_destinations {
                     vec![
                         Trip::new(StationId(1), StationId(2), 100, 200),
                         Trip::new(StationId(2), StationId(3), 300, 600)
+                    ]
+                )
+            ]
+        )
+    }
+
+    #[test]
+    fn test_find_destinations_multiple_connections() {
+        let origin = StationId::from(1);
+        let graph = graph_with_2_connections();
+
+        let destinations = find_destinations(&origin, &graph);
+
+        assert_eq!(destinations.len(), 3);
+        assert_eq!(
+            destinations,
+            vec![
+                Destination::new(
+                    StationId(2),
+                    vec![Trip::new(StationId(1), StationId(2), 100, 200)]
+                ),
+                Destination::new(
+                    StationId(3),
+                    vec![
+                        Trip::new(StationId(1), StationId(2), 100, 200),
+                        Trip::new(StationId(2), StationId(3), 300, 500)
+                    ]
+                ),
+                Destination::new(
+                    StationId(4),
+                    vec![
+                        Trip::new(StationId(1), StationId(2), 100, 200),
+                        Trip::new(StationId(2), StationId(3), 300, 500),
+                        Trip::new(StationId(3), StationId(4), 600, 700)
                     ]
                 )
             ]
