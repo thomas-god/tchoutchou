@@ -18,30 +18,59 @@ pub struct Graph {
     trips_by_nodes: HashMap<StationId, Vec<Trip>>,
 }
 
+#[derive(Debug, Clone, Constructor)]
+pub struct DestinationFilters {
+    max_connections: usize,
+    min_connection_duration: usize,
+    max_duration: usize,
+}
+
+impl Default for DestinationFilters {
+    fn default() -> Self {
+        Self {
+            max_connections: 2,
+            min_connection_duration: 900,
+            max_duration: 3600 * 12,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Destination {
     station: StationId,
     trips: Vec<Trip>,
     current_time: usize,
+    duration: usize,
 }
 
 impl Destination {
     fn new(station: StationId, trips: Vec<Trip>) -> Self {
+        let arrival = trips
+            .iter()
+            .map(|trip| trip.arrival)
+            .max()
+            .unwrap_or_default();
+        let departure = trips
+            .iter()
+            .map(|trip| trip.departure)
+            .min()
+            .unwrap_or_default();
         Self {
             station,
-            current_time: trips
-                .iter()
-                .map(|trip| trip.arrival)
-                .max()
-                .unwrap_or_default(),
-            trips,
+            current_time: arrival,
+            duration: arrival - departure,
+            trips: trips.clone(),
         }
     }
 
     /// Try to connect a `Trip` to itself if compatible (same origin, compatible departure,
     /// no loopback). Returns `None` if the trip is not compatible, otherwise `Some(Self)` with
     /// the new extended destination.
-    fn try_connect_trip(&self, trip: &Trip) -> Option<Self> {
+    fn try_connect_trip(&self, trip: &Trip, filters: &DestinationFilters) -> Option<Self> {
+        if self.trips.len() > filters.max_connections {
+            return None;
+        }
+
         if self.station != trip.origin {
             return None;
         }
@@ -52,7 +81,11 @@ impl Destination {
             return None;
         }
 
-        if trip.departure <= self.current_time {
+        if trip.departure <= self.current_time + filters.min_connection_duration {
+            return None;
+        }
+
+        if self.duration + trip.arrival - self.current_time > filters.max_duration {
             return None;
         }
 
@@ -62,19 +95,24 @@ impl Destination {
         Some(Self {
             station: trip.destination,
             current_time: trip.arrival,
+            duration: self.duration + trip.arrival - self.current_time,
             trips: new_trips,
         })
     }
 
-    fn find_connections_from(&self, trips: &[Trip]) -> Vec<Self> {
+    fn find_connections_from(&self, trips: &[Trip], filters: &DestinationFilters) -> Vec<Self> {
         trips
             .iter()
-            .filter_map(|trip| self.try_connect_trip(trip))
+            .filter_map(|trip| self.try_connect_trip(trip, filters))
             .collect()
     }
 }
 
-pub fn find_destinations(origin: &StationId, graph: &Graph) -> Vec<Destination> {
+pub fn find_destinations(
+    origin: &StationId,
+    graph: &Graph,
+    filters: &DestinationFilters,
+) -> Vec<Destination> {
     let mut destinations = vec![];
 
     let Some(first_trips) = graph.trips_by_nodes.get(origin) else {
@@ -88,22 +126,26 @@ pub fn find_destinations(origin: &StationId, graph: &Graph) -> Vec<Destination> 
         destinations.push(Destination::new(trip.destination, vec![trip.clone()]));
     }
 
-    find_new_destinations(graph, destinations)
+    find_new_destinations(graph, destinations, filters)
 }
 
-fn find_new_destinations(graph: &Graph, mut destinations: Vec<Destination>) -> Vec<Destination> {
+fn find_new_destinations(
+    graph: &Graph,
+    mut destinations: Vec<Destination>,
+    filters: &DestinationFilters,
+) -> Vec<Destination> {
     let mut new_destinations = vec![];
 
     for destination in destinations.iter() {
         if let Some(trips) = graph.trips_by_nodes.get(&destination.station) {
-            new_destinations.extend(destination.find_connections_from(trips));
+            new_destinations.extend(destination.find_connections_from(trips, filters));
         }
     }
 
     if new_destinations.is_empty() {
         return destinations;
     } else {
-        destinations.extend(find_new_destinations(graph, new_destinations));
+        destinations.extend(find_new_destinations(graph, new_destinations, filters));
         return destinations;
     }
 }
@@ -126,7 +168,7 @@ mod test_find_destinations {
             StationId(1),
             vec![
                 Trip::new(StationId(1), StationId(2), 100, 200),
-                Trip::new(StationId(1), StationId(3), 100, 500),
+                Trip::new(StationId(1), StationId(3), 1200, 1300),
             ],
         )]);
 
@@ -141,7 +183,7 @@ mod test_find_destinations {
             ),
             (
                 StationId(2),
-                vec![Trip::new(StationId(2), StationId(3), 300, 500)],
+                vec![Trip::new(StationId(2), StationId(3), 1200, 1300)],
             ),
         ]);
 
@@ -159,7 +201,7 @@ mod test_find_destinations {
             ),
             (
                 StationId(2),
-                vec![Trip::new(StationId(2), StationId(3), 300, 600)],
+                vec![Trip::new(StationId(2), StationId(3), 1200, 1300)],
             ),
         ]);
 
@@ -174,11 +216,11 @@ mod test_find_destinations {
             ),
             (
                 StationId(2),
-                vec![Trip::new(StationId(2), StationId(3), 300, 500)],
+                vec![Trip::new(StationId(2), StationId(3), 1200, 1300)],
             ),
             (
                 StationId(3),
-                vec![Trip::new(StationId(3), StationId(4), 600, 700)],
+                vec![Trip::new(StationId(3), StationId(4), 2300, 2400)],
             ),
         ]);
 
@@ -190,7 +232,7 @@ mod test_find_destinations {
         let origin = StationId::from(2);
         let graph = graph_with_one_trip();
 
-        let destinations = find_destinations(&origin, &graph);
+        let destinations = find_destinations(&origin, &graph, &DestinationFilters::default());
 
         assert!(destinations.is_empty());
     }
@@ -200,7 +242,7 @@ mod test_find_destinations {
         let origin = StationId::from(1);
         let graph = graph_with_two_trips_same_origin();
 
-        let destinations = find_destinations(&origin, &graph);
+        let destinations = find_destinations(&origin, &graph, &DestinationFilters::default());
 
         assert_eq!(destinations.len(), 2);
         assert_eq!(
@@ -212,7 +254,7 @@ mod test_find_destinations {
                 ),
                 Destination::new(
                     StationId(3),
-                    vec![Trip::new(StationId(1), StationId(3), 100, 500)]
+                    vec![Trip::new(StationId(1), StationId(3), 1200, 1300)]
                 )
             ]
         )
@@ -223,7 +265,7 @@ mod test_find_destinations {
         let origin = StationId::from(1);
         let graph = graph_with_one_connection();
 
-        let destinations = find_destinations(&origin, &graph);
+        let destinations = find_destinations(&origin, &graph, &DestinationFilters::default());
 
         assert_eq!(destinations.len(), 2);
         assert_eq!(
@@ -237,7 +279,7 @@ mod test_find_destinations {
                     StationId(3),
                     vec![
                         Trip::new(StationId(1), StationId(2), 100, 200),
-                        Trip::new(StationId(2), StationId(3), 300, 500)
+                        Trip::new(StationId(2), StationId(3), 1200, 1300)
                     ]
                 )
             ]
@@ -249,7 +291,7 @@ mod test_find_destinations {
         let origin = StationId::from(1);
         let graph = graph_with_one_connection_and_one_direct();
 
-        let destinations = find_destinations(&origin, &graph);
+        let destinations = find_destinations(&origin, &graph, &DestinationFilters::default());
 
         assert_eq!(destinations.len(), 3);
         assert_eq!(
@@ -267,7 +309,7 @@ mod test_find_destinations {
                     StationId(3),
                     vec![
                         Trip::new(StationId(1), StationId(2), 100, 200),
-                        Trip::new(StationId(2), StationId(3), 300, 600)
+                        Trip::new(StationId(2), StationId(3), 1200, 1300)
                     ]
                 )
             ]
@@ -279,9 +321,9 @@ mod test_find_destinations {
         let origin = StationId::from(1);
         let graph = graph_with_2_connections();
 
-        let destinations = find_destinations(&origin, &graph);
+        let destinations = find_destinations(&origin, &graph, &DestinationFilters::default());
 
-        assert_eq!(destinations.len(), 3);
+        // assert_eq!(destinations.len(), 3);
         assert_eq!(
             destinations,
             vec![
@@ -293,15 +335,15 @@ mod test_find_destinations {
                     StationId(3),
                     vec![
                         Trip::new(StationId(1), StationId(2), 100, 200),
-                        Trip::new(StationId(2), StationId(3), 300, 500)
+                        Trip::new(StationId(2), StationId(3), 1200, 1300)
                     ]
                 ),
                 Destination::new(
                     StationId(4),
                     vec![
                         Trip::new(StationId(1), StationId(2), 100, 200),
-                        Trip::new(StationId(2), StationId(3), 300, 500),
-                        Trip::new(StationId(3), StationId(4), 600, 700)
+                        Trip::new(StationId(2), StationId(3), 1200, 1300),
+                        Trip::new(StationId(3), StationId(4), 2300, 2400)
                     ]
                 )
             ]
@@ -319,9 +361,13 @@ mod test_destination_struct {
             StationId(2),
             vec![Trip::new(StationId(1), StationId(2), 100, 300)],
         );
-        let trip = Trip::new(StationId(3), StationId(4), 400, 500);
+        let trip = Trip::new(StationId(3), StationId(4), 1201, 1300);
 
-        assert!(destination.try_connect_trip(&trip).is_none())
+        assert!(
+            destination
+                .try_connect_trip(&trip, &DestinationFilters::default())
+                .is_none()
+        )
     }
 
     #[test]
@@ -330,15 +376,17 @@ mod test_destination_struct {
             StationId(2),
             vec![Trip::new(StationId(1), StationId(2), 100, 300)],
         );
-        let trip = Trip::new(StationId(2), StationId(4), 400, 500);
+        let trip = Trip::new(StationId(2), StationId(4), 1201, 1300);
 
         assert_eq!(
-            destination.try_connect_trip(&trip).unwrap(),
+            destination
+                .try_connect_trip(&trip, &DestinationFilters::default())
+                .unwrap(),
             Destination::new(
                 StationId(4),
                 vec![
                     Trip::new(StationId(1), StationId(2), 100, 300),
-                    Trip::new(StationId(2), StationId(4), 400, 500)
+                    Trip::new(StationId(2), StationId(4), 1201, 1300)
                 ],
             )
         )
@@ -350,9 +398,13 @@ mod test_destination_struct {
             StationId(2),
             vec![Trip::new(StationId(1), StationId(2), 100, 300)],
         );
-        let trip = Trip::new(StationId(2), StationId(1), 400, 500);
+        let trip = Trip::new(StationId(2), StationId(1), 1201, 1300);
 
-        assert!(destination.try_connect_trip(&trip).is_none())
+        assert!(
+            destination
+                .try_connect_trip(&trip, &DestinationFilters::default())
+                .is_none()
+        )
     }
 
     #[test]
@@ -361,9 +413,13 @@ mod test_destination_struct {
             StationId(2),
             vec![Trip::new(StationId(1), StationId(2), 100, 300)],
         );
-        let trip = Trip::new(StationId(2), StationId(2), 400, 500);
+        let trip = Trip::new(StationId(2), StationId(2), 1201, 1300);
 
-        assert!(destination.try_connect_trip(&trip).is_none())
+        assert!(
+            destination
+                .try_connect_trip(&trip, &DestinationFilters::default())
+                .is_none()
+        )
     }
 
     #[test]
@@ -372,9 +428,64 @@ mod test_destination_struct {
             StationId(2),
             vec![Trip::new(StationId(1), StationId(2), 100, 300)],
         );
-        let trip = Trip::new(StationId(2), StationId(3), 300, 500);
+        let trip = Trip::new(StationId(2), StationId(3), 310, 500);
 
-        assert!(destination.try_connect_trip(&trip).is_none())
+        assert!(
+            destination
+                .try_connect_trip(
+                    &trip,
+                    &DestinationFilters {
+                        min_connection_duration: 10,
+                        ..Default::default()
+                    }
+                )
+                .is_none()
+        )
+    }
+
+    #[test]
+    fn test_try_connect_trip_to_destination_max_connections_reached() {
+        let destination = Destination::new(
+            StationId(3),
+            vec![
+                Trip::new(StationId(1), StationId(2), 100, 300),
+                Trip::new(StationId(2), StationId(3), 1300, 1400),
+            ],
+        );
+        let trip = Trip::new(StationId(3), StationId(4), 2400, 2500);
+
+        assert!(
+            destination
+                .try_connect_trip(
+                    &trip,
+                    &DestinationFilters {
+                        max_connections: 1,
+                        ..Default::default()
+                    }
+                )
+                .is_none()
+        )
+    }
+
+    #[test]
+    fn test_try_connect_trip_to_destination_max_duration_reached() {
+        let destination = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(1), StationId(2), 100, 300)],
+        );
+        let trip = Trip::new(StationId(2), StationId(3), 1300, 1400);
+
+        assert!(
+            destination
+                .try_connect_trip(
+                    &trip,
+                    &DestinationFilters {
+                        max_duration: (300 - 100) + (1300 - 300) + (1400 - 1300) - 1,
+                        ..Default::default()
+                    }
+                )
+                .is_none()
+        )
     }
 
     #[test]
@@ -384,12 +495,13 @@ mod test_destination_struct {
             vec![Trip::new(StationId(1), StationId(2), 100, 300)],
         );
         let trips = vec![
-            Trip::new(StationId(2), StationId(3), 400, 500),
-            Trip::new(StationId(2), StationId(4), 400, 500),
-            Trip::new(StationId(2), StationId(1), 400, 500),
+            Trip::new(StationId(2), StationId(3), 1201, 1300),
+            Trip::new(StationId(2), StationId(4), 1201, 1300),
+            Trip::new(StationId(2), StationId(1), 1201, 1300),
         ];
 
-        let new_destinations = destination.find_connections_from(&trips);
+        let new_destinations =
+            destination.find_connections_from(&trips, &DestinationFilters::default());
 
         assert_eq!(
             new_destinations,
@@ -398,14 +510,14 @@ mod test_destination_struct {
                     StationId(3),
                     vec![
                         Trip::new(StationId(1), StationId(2), 100, 300),
-                        Trip::new(StationId(2), StationId(3), 400, 500)
+                        Trip::new(StationId(2), StationId(3), 1201, 1300)
                     ],
                 ),
                 Destination::new(
                     StationId(4),
                     vec![
                         Trip::new(StationId(1), StationId(2), 100, 300),
-                        Trip::new(StationId(2), StationId(4), 400, 500),
+                        Trip::new(StationId(2), StationId(4), 1201, 1300),
                     ],
                 )
             ]
