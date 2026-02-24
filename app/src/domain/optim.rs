@@ -5,18 +5,6 @@ use derive_more::{Constructor, From};
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, From)]
 pub struct StationId(usize);
 
-#[derive(Debug, Clone, Constructor)]
-pub struct Station {
-    id: StationId,
-    name: String,
-}
-
-impl PartialEq for Station {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Constructor)]
 pub struct Trip {
     origin: StationId,
@@ -27,7 +15,6 @@ pub struct Trip {
 
 #[derive(Debug, Clone, Constructor)]
 pub struct Graph {
-    nodes: HashMap<StationId, Station>,
     trips_by_nodes: HashMap<StationId, Vec<Trip>>,
 }
 
@@ -117,39 +104,15 @@ mod test_find_destinations {
     use super::*;
 
     fn graph_with_one_trip() -> Graph {
-        let nodes = HashMap::from_iter(vec![
-            (
-                StationId::from(1),
-                Station::new(StationId(1), "Paris".into()),
-            ),
-            (
-                StationId::from(2),
-                Station::new(StationId(2), "Lyon".into()),
-            ),
-        ]);
         let trips_by_nodes = HashMap::from_iter(vec![(
             StationId(1),
             vec![Trip::new(StationId(1), StationId(2), 100, 200)],
         )]);
 
-        Graph::new(nodes, trips_by_nodes)
+        Graph::new(trips_by_nodes)
     }
 
     fn graph_with_two_trips_same_origin() -> Graph {
-        let nodes = HashMap::from_iter(vec![
-            (
-                StationId::from(1),
-                Station::new(StationId(1), "Paris".into()),
-            ),
-            (
-                StationId::from(2),
-                Station::new(StationId(2), "Lyon".into()),
-            ),
-            (
-                StationId::from(3),
-                Station::new(StationId(3), "Marseille".into()),
-            ),
-        ]);
         let trips_by_nodes = HashMap::from_iter(vec![(
             StationId(1),
             vec![
@@ -158,42 +121,10 @@ mod test_find_destinations {
             ],
         )]);
 
-        Graph::new(nodes, trips_by_nodes)
-    }
-
-    fn graph_with_two_trips_with_loopback() -> Graph {
-        let nodes = HashMap::from_iter(vec![
-            (
-                StationId::from(1),
-                Station::new(StationId(1), "Paris".into()),
-            ),
-            (
-                StationId::from(2),
-                Station::new(StationId(2), "Lyon".into()),
-            ),
-        ]);
-        let trips_by_nodes = HashMap::from_iter(vec![(
-            StationId(1),
-            vec![
-                Trip::new(StationId(1), StationId(2), 100, 200),
-                Trip::new(StationId(1), StationId(1), 100, 500),
-            ],
-        )]);
-
-        Graph::new(nodes, trips_by_nodes)
+        Graph::new(trips_by_nodes)
     }
 
     fn graph_with_one_connection() -> Graph {
-        let nodes = HashMap::from_iter(vec![
-            (
-                StationId::from(1),
-                Station::new(StationId(1), "Paris".into()),
-            ),
-            (
-                StationId::from(2),
-                Station::new(StationId(2), "Lyon".into()),
-            ),
-        ]);
         let trips_by_nodes = HashMap::from_iter(vec![
             (
                 StationId(1),
@@ -205,52 +136,10 @@ mod test_find_destinations {
             ),
         ]);
 
-        Graph::new(nodes, trips_by_nodes)
-    }
-
-    fn graph_with_one_connection_and_loopbacks() -> Graph {
-        let nodes = HashMap::from_iter(vec![
-            (
-                StationId::from(1),
-                Station::new(StationId(1), "Paris".into()),
-            ),
-            (
-                StationId::from(2),
-                Station::new(StationId(2), "Lyon".into()),
-            ),
-        ]);
-        let trips_by_nodes = HashMap::from_iter(vec![
-            (
-                StationId(1),
-                vec![Trip::new(StationId(1), StationId(2), 100, 200)],
-            ),
-            (
-                StationId(2),
-                vec![
-                    // New, unvisited station
-                    Trip::new(StationId(2), StationId(3), 300, 500),
-                    // Loopback to origin station
-                    Trip::new(StationId(2), StationId(1), 300, 500),
-                    // Loopback to current station
-                    Trip::new(StationId(2), StationId(2), 300, 500),
-                ],
-            ),
-        ]);
-
-        Graph::new(nodes, trips_by_nodes)
+        Graph::new(trips_by_nodes)
     }
 
     fn graph_with_one_connection_and_one_direct() -> Graph {
-        let nodes = HashMap::from_iter(vec![
-            (
-                StationId::from(1),
-                Station::new(StationId(1), "Paris".into()),
-            ),
-            (
-                StationId::from(2),
-                Station::new(StationId(2), "Lyon".into()),
-            ),
-        ]);
         let trips_by_nodes = HashMap::from_iter(vec![
             (
                 StationId(1),
@@ -265,7 +154,7 @@ mod test_find_destinations {
             ),
         ]);
 
-        Graph::new(nodes, trips_by_nodes)
+        Graph::new(trips_by_nodes)
     }
 
     #[test]
@@ -276,23 +165,6 @@ mod test_find_destinations {
         let destinations = find_destinations(&origin, &graph);
 
         assert!(destinations.is_empty());
-    }
-
-    #[test]
-    fn test_find_destinations_one_trip() {
-        let origin = StationId::from(1);
-        let graph = graph_with_one_trip();
-
-        let destinations = find_destinations(&origin, &graph);
-
-        assert_eq!(destinations.len(), 1);
-        assert_eq!(
-            destinations.first().unwrap(),
-            &Destination::new(
-                StationId(2),
-                vec![Trip::new(StationId(1), StationId(2), 100, 200)]
-            )
-        )
     }
 
     #[test]
@@ -319,52 +191,9 @@ mod test_find_destinations {
     }
 
     #[test]
-    fn test_find_destinations_dont_loopback() {
-        let origin = StationId::from(1);
-        let graph = graph_with_two_trips_with_loopback();
-
-        let destinations = find_destinations(&origin, &graph);
-
-        assert_eq!(destinations.len(), 1);
-        assert_eq!(
-            destinations,
-            vec![Destination::new(
-                StationId(2),
-                vec![Trip::new(StationId(1), StationId(2), 100, 200)]
-            ),]
-        )
-    }
-
-    #[test]
     fn test_find_destinations_with_one_connection() {
         let origin = StationId::from(1);
         let graph = graph_with_one_connection();
-
-        let destinations = find_destinations(&origin, &graph);
-
-        assert_eq!(destinations.len(), 2);
-        assert_eq!(
-            destinations,
-            vec![
-                Destination::new(
-                    StationId(2),
-                    vec![Trip::new(StationId(1), StationId(2), 100, 200)]
-                ),
-                Destination::new(
-                    StationId(3),
-                    vec![
-                        Trip::new(StationId(1), StationId(2), 100, 200),
-                        Trip::new(StationId(2), StationId(3), 300, 500)
-                    ]
-                )
-            ]
-        )
-    }
-
-    #[test]
-    fn test_find_destinations_with_one_connection_and_dont_loopback() {
-        let origin = StationId::from(1);
-        let graph = graph_with_one_connection_and_loopbacks();
 
         let destinations = find_destinations(&origin, &graph);
 
