@@ -1,13 +1,6 @@
 use derive_more::Constructor;
 
-#[derive(Debug, Clone, PartialEq, Constructor)]
-pub struct Station {
-    id: String,
-    name: String,
-    lat: f64,
-    lon: f64,
-    children: Vec<String>,
-}
+use crate::infra::importers::gtfs::parser::{ImportedStation, ImportedStationId, ImportedStopId};
 
 #[derive(Debug, Clone, Constructor, PartialEq)]
 struct GTFSHeaders {
@@ -71,7 +64,7 @@ impl GTFSStationParser {
         None
     }
 
-    pub fn stations(&self) -> Option<Vec<Station>> {
+    pub fn stations(&self) -> Option<Vec<ImportedStation>> {
         let headers = self.headers()?;
 
         let mut stations = vec![];
@@ -98,7 +91,8 @@ impl GTFSStationParser {
                     .and_then(|lon| lon.parse::<f64>().ok()),
                 cols.get(headers.location_type)
                     .and_then(|t| t.parse::<usize>().ok()),
-                cols.get(headers.parent_station),
+                cols.get(headers.parent_station)
+                    .map(|id| ImportedStationId::from(id.to_string())),
             )
             else {
                 continue;
@@ -106,8 +100,8 @@ impl GTFSStationParser {
 
             match location_type {
                 1 => {
-                    stations.push(Station::new(
-                        id.to_string(),
+                    stations.push(ImportedStation::new(
+                        ImportedStationId::from(id.to_string()),
                         name.to_string(),
                         lat,
                         lon,
@@ -116,12 +110,12 @@ impl GTFSStationParser {
                 }
                 0 => match stations
                     .iter_mut()
-                    .find(|station| &station.id == parent_station)
+                    .find(|station| station.id == parent_station)
                 {
                     Some(parent) => {
-                        parent.children.push(id.to_string());
+                        parent.stops.push(ImportedStopId::from(id.to_string()));
                     }
-                    None => orphans.push((id.to_string(), parent_station.to_string())),
+                    None => orphans.push((id.to_string(), parent_station)),
                 },
                 _ => continue,
             }
@@ -131,7 +125,7 @@ impl GTFSStationParser {
         for (id, parent) in orphans.iter() {
             match stations.iter_mut().find(|station| &station.id == parent) {
                 Some(parent) => {
-                    parent.children.push(id.to_string());
+                    parent.stops.push(ImportedStopId::from(id.to_string()));
                 }
                 None => {
                     println!("Could not find a parent with ID {id:?} for station {parent:?}")
@@ -161,12 +155,14 @@ StopPoint:OCETGV INOUI-71043075,FIGUERES-VILAFANT,,42.2645810,2.94302800,,,0,Sto
         let stations = parser.stations();
         assert_eq!(
             stations.expect("Should be Some()"),
-            vec![Station::new(
-                "StopArea:OCE71043075".to_string(),
+            vec![ImportedStation::new(
+                ImportedStationId::from("StopArea:OCE71043075".to_string()),
                 "FIGUERES-VILAFANT".to_string(),
                 42.2645810,
                 2.94302800,
-                vec!["StopPoint:OCETGV INOUI-71043075".to_string()]
+                vec![ImportedStopId::from(
+                    "StopPoint:OCETGV INOUI-71043075".to_string()
+                )]
             )]
         )
     }
@@ -182,12 +178,14 @@ StopArea:OCE71043075,FIGUERES-VILAFANT,,42.2645810,2.94302800,,,1,".to_string();
         let stations = parser.stations();
         assert_eq!(
             stations.expect("Should be Some()"),
-            vec![Station::new(
-                "StopArea:OCE71043075".to_string(),
+            vec![ImportedStation::new(
+                ImportedStationId::from("StopArea:OCE71043075".to_string()),
                 "FIGUERES-VILAFANT".to_string(),
                 42.2645810,
                 2.94302800,
-                vec!["StopPoint:OCETGV INOUI-71043075".to_string()]
+                vec![ImportedStopId::from(
+                    "StopPoint:OCETGV INOUI-71043075".to_string()
+                )]
             )]
         )
     }
