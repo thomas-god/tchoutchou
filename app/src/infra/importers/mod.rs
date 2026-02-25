@@ -33,4 +33,10 @@ impl ImportedTrip {
     pub fn destination(&self) -> &ImportedStationId {
         &self.destination
     }
+    pub fn departure(&self) -> usize {
+        self.departure
+    }
+    pub fn arrival(&self) -> usize {
+        self.arrival
+    }
 }

@@ -18,6 +18,16 @@ pub struct Graph {
     trips_by_nodes: HashMap<StationId, Vec<Trip>>,
 }
 
+#[cfg(test)]
+impl Graph {
+    pub fn trips_from(&self, station: StationId) -> &[Trip] {
+        self.trips_by_nodes
+            .get(&station)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+}
+
 #[derive(Debug, Clone, Constructor)]
 pub struct DestinationFilters {
     max_connections: usize,
