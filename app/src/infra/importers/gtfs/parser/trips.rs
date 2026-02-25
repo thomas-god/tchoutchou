@@ -5,7 +5,7 @@ use chrono_tz::Europe::Paris;
 
 use derive_more::{Constructor, From};
 
-use crate::infra::importers::gtfs::parser::{ImportedStopId, ImportedTrip};
+use crate::infra::importers::gtfs::{GTFSStopId, parser::GTFSTrip};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
 struct TripId(String);
@@ -15,7 +15,7 @@ struct ServiceId(String);
 
 #[derive(Debug, Clone, Constructor, PartialEq)]
 struct Stop {
-    id: ImportedStopId,
+    id: GTFSStopId,
     trip: TripId,
     arrival: String,
     departure: String,
@@ -64,7 +64,7 @@ impl GTFSTripsParser {
         }
     }
 
-    pub fn trips(&self) -> Vec<ImportedTrip> {
+    pub fn trips(&self) -> Vec<GTFSTrip> {
         let Some(header) = self.stop_times_header() else {
             return vec![];
         };
@@ -81,7 +81,7 @@ impl GTFSTripsParser {
                 cols.get(header.arrival_time).map(|date| date.to_string()),
                 cols.get(header.departure_time).map(|date| date.to_string()),
                 cols.get(header.stop_id)
-                    .map(|id| ImportedStopId::from(id.to_string())),
+                    .map(|id| GTFSStopId::from(id.to_string())),
                 cols.get(header.stop_sequence)
                     .and_then(|val| val.parse::<usize>().ok()),
             ) else {
@@ -138,7 +138,7 @@ impl GTFSTripsParser {
                         ) else {
                             continue;
                         };
-                        trips.push(ImportedTrip {
+                        trips.push(GTFSTrip {
                             origin: origin.id.clone(),
                             destination: destination.id.clone(),
                             departure,
@@ -355,44 +355,44 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
 
         let mut expected_trips = vec![
             // A -> B, 20260501
-            ImportedTrip::new(
-                ImportedStopId::from("StopPoint:OCETrain TER-87723197".to_string()),
-                ImportedStopId::from("StopPoint:OCETrain TER-87721282".to_string()),
+            GTFSTrip::new(
+                GTFSStopId::from("StopPoint:OCETrain TER-87723197".to_string()),
+                GTFSStopId::from("StopPoint:OCETrain TER-87721282".to_string()),
                 1777619760, // 9h16
                 1777620480, // 9h28
             ),
             // B -> C, 20260501
-            ImportedTrip::new(
-                ImportedStopId::from("StopPoint:OCETrain TER-87721282".to_string()),
-                ImportedStopId::from("StopPoint:OCETrain TER-87721332".to_string()),
+            GTFSTrip::new(
+                GTFSStopId::from("StopPoint:OCETrain TER-87721282".to_string()),
+                GTFSStopId::from("StopPoint:OCETrain TER-87721332".to_string()),
                 1777620600, // 9h30
                 1777621080, // 9h38
             ),
             // A -> C, 20260501
-            ImportedTrip::new(
-                ImportedStopId::from("StopPoint:OCETrain TER-87723197".to_string()),
-                ImportedStopId::from("StopPoint:OCETrain TER-87721332".to_string()),
+            GTFSTrip::new(
+                GTFSStopId::from("StopPoint:OCETrain TER-87723197".to_string()),
+                GTFSStopId::from("StopPoint:OCETrain TER-87721332".to_string()),
                 1777619760, // 9h16
                 1777621080, // 9h38
             ),
             // A -> B, 20260508
-            ImportedTrip::new(
-                ImportedStopId::from("StopPoint:OCETrain TER-87723197".to_string()),
-                ImportedStopId::from("StopPoint:OCETrain TER-87721282".to_string()),
+            GTFSTrip::new(
+                GTFSStopId::from("StopPoint:OCETrain TER-87723197".to_string()),
+                GTFSStopId::from("StopPoint:OCETrain TER-87721282".to_string()),
                 1778224560, // 9h16
                 1778225280, // 9h28
             ),
             // B -> C, 20260508
-            ImportedTrip::new(
-                ImportedStopId::from("StopPoint:OCETrain TER-87721282".to_string()),
-                ImportedStopId::from("StopPoint:OCETrain TER-87721332".to_string()),
+            GTFSTrip::new(
+                GTFSStopId::from("StopPoint:OCETrain TER-87721282".to_string()),
+                GTFSStopId::from("StopPoint:OCETrain TER-87721332".to_string()),
                 1778225400, // 9h30
                 1778225880, // 9h38
             ),
             // A -> C, 20260508
-            ImportedTrip::new(
-                ImportedStopId::from("StopPoint:OCETrain TER-87723197".to_string()),
-                ImportedStopId::from("StopPoint:OCETrain TER-87721332".to_string()),
+            GTFSTrip::new(
+                GTFSStopId::from("StopPoint:OCETrain TER-87723197".to_string()),
+                GTFSStopId::from("StopPoint:OCETrain TER-87721332".to_string()),
                 1778224560, // 9h16
                 1778225880, // 9h38
             ),
@@ -498,11 +498,8 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
         // Only STOP_A and STOP_C are valid → one trip pair expected
         let trips = parser.trips();
         assert_eq!(trips.len(), 1);
-        assert_eq!(trips[0].origin, ImportedStopId::from("STOP_A".to_string()));
-        assert_eq!(
-            trips[0].destination,
-            ImportedStopId::from("STOP_C".to_string())
-        );
+        assert_eq!(trips[0].origin, GTFSStopId::from("STOP_A".to_string()));
+        assert_eq!(trips[0].destination, GTFSStopId::from("STOP_C".to_string()));
     }
 
     #[test]
@@ -519,11 +516,8 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
         );
         let trips = parser.trips();
         assert_eq!(trips.len(), 1);
-        assert_eq!(trips[0].origin, ImportedStopId::from("STOP_A".to_string()));
-        assert_eq!(
-            trips[0].destination,
-            ImportedStopId::from("STOP_C".to_string())
-        );
+        assert_eq!(trips[0].origin, GTFSStopId::from("STOP_A".to_string()));
+        assert_eq!(trips[0].destination, GTFSStopId::from("STOP_C".to_string()));
     }
 
     #[test]

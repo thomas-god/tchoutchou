@@ -1,39 +1,14 @@
-use derive_more::{Constructor, From};
-
-use crate::infra::importers::gtfs::parser::{stations::GTFSStationParser, trips::GTFSTripsParser};
+use crate::infra::importers::gtfs::{
+    GTFSStation, GTFSTrip,
+    parser::{stations::GTFSStationParser, trips::GTFSTripsParser},
+};
 
 mod stations;
 mod trips;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
-pub struct ImportedStationId(String);
-
-/// A station can contain several, possibly abstract, stops. For example `StationId` "Paris Gare de
-/// Lyon" can contain `StopId`s "Paris Gare de Lyon - TGV" and "Paris Gare de Lyon - OUIGO" amongst
-/// others.
-#[derive(Debug, Clone, PartialEq, PartialOrd, From, Hash, Eq, Ord)]
-pub struct ImportedStopId(String);
-
-#[derive(Debug, Clone, PartialEq, Constructor)]
-pub struct ImportedStation {
-    id: ImportedStationId,
-    name: String,
-    lat: f64,
-    lon: f64,
-    stops: Vec<ImportedStopId>,
-}
-
-#[derive(Debug, Clone, Constructor, PartialEq, PartialOrd, Eq, Ord)]
-pub struct ImportedTrip {
-    origin: ImportedStopId,
-    destination: ImportedStopId,
-    departure: usize,
-    arrival: usize,
-}
-
 pub struct GTFSParser {
-    stations: Vec<ImportedStation>,
-    trips: Vec<ImportedTrip>,
+    stations: Vec<GTFSStation>,
+    trips: Vec<GTFSTrip>,
 }
 
 impl GTFSParser {
@@ -53,11 +28,11 @@ impl GTFSParser {
         Some(Self { stations, trips })
     }
 
-    pub fn trips(&self) -> &[ImportedTrip] {
+    pub fn trips(&self) -> &[GTFSTrip] {
         &self.trips
     }
 
-    pub fn stations(&self) -> &[ImportedStation] {
+    pub fn stations(&self) -> &[GTFSStation] {
         &self.stations
     }
 }
@@ -68,6 +43,8 @@ mod tests {
     use chrono_tz::Europe::Paris;
     use pretty_assertions::assert_eq;
     use std::fs;
+
+    use crate::infra::importers::gtfs::{GTFSStationId, GTFSStopId};
 
     use super::*;
 
@@ -125,19 +102,19 @@ mod tests {
         assert_eq!(
             stations,
             vec![
-                ImportedStation::new(
-                    ImportedStationId::from("StopArea:PARIS".to_string()),
+                GTFSStation::new(
+                    GTFSStationId::from("StopArea:PARIS".to_string()),
                     "Paris Gare de Lyon".to_string(),
                     48.8448,
                     2.3735,
-                    vec![ImportedStopId::from("StopPoint:PARIS_TGV".to_string())],
+                    vec![GTFSStopId::from("StopPoint:PARIS_TGV".to_string())],
                 ),
-                ImportedStation::new(
-                    ImportedStationId::from("StopArea:LYON".to_string()),
+                GTFSStation::new(
+                    GTFSStationId::from("StopArea:LYON".to_string()),
                     "Lyon Part-Dieu".to_string(),
                     45.7605,
                     4.8597,
-                    vec![ImportedStopId::from("StopPoint:LYON_MAIN".to_string())],
+                    vec![GTFSStopId::from("StopPoint:LYON_MAIN".to_string())],
                 ),
             ]
         );
@@ -146,9 +123,9 @@ mod tests {
         trips.sort();
         assert_eq!(
             trips,
-            vec![ImportedTrip::new(
-                ImportedStopId::from("StopPoint:PARIS_TGV".to_string()),
-                ImportedStopId::from("StopPoint:LYON_MAIN".to_string()),
+            vec![GTFSTrip::new(
+                GTFSStopId::from("StopPoint:PARIS_TGV".to_string()),
+                GTFSStopId::from("StopPoint:LYON_MAIN".to_string()),
                 paris_timestamp(2026, 2, 25, 10, 0, 0),
                 paris_timestamp(2026, 2, 25, 12, 0, 0),
             )]
