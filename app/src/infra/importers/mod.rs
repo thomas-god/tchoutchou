@@ -12,10 +12,25 @@ pub struct ImportedStation {
     lon: f64,
 }
 
+impl ImportedStation {
+    pub fn id(&self) -> &ImportedStationId {
+        &self.id
+    }
+}
+
 #[derive(Debug, Clone, Constructor, PartialEq, PartialOrd, Eq, Ord)]
 pub struct ImportedTrip {
     origin: ImportedStationId,
     destination: ImportedStationId,
     departure: usize,
     arrival: usize,
+}
+
+impl ImportedTrip {
+    pub fn origin(&self) -> &ImportedStationId {
+        &self.origin
+    }
+    pub fn destination(&self) -> &ImportedStationId {
+        &self.destination
+    }
 }

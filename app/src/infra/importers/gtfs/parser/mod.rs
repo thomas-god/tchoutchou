@@ -1,5 +1,5 @@
 use crate::infra::importers::gtfs::{
-    GTFSStation, GTFSTrip,
+    GTFSStation, GTFSTrip, ParseGTFS,
     parser::{stations::GTFSStationParser, trips::GTFSTripsParser},
 };
 
@@ -27,12 +27,14 @@ impl GTFSParser {
 
         Some(Self { stations, trips })
     }
+}
 
-    pub fn trips(&self) -> &[GTFSTrip] {
+impl ParseGTFS for GTFSParser {
+    fn trips(&self) -> &[GTFSTrip] {
         &self.trips
     }
 
-    pub fn stations(&self) -> &[GTFSStation] {
+    fn stations(&self) -> &[GTFSStation] {
         &self.stations
     }
 }
