@@ -33,3 +33,6 @@ vite.config.ts.timestamp-*
 
 # Cargo
 /target
+
+# Profiling
+profile.json.gz
