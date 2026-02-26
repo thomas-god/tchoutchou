@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use crate::infra::importers::gtfs::{
-    GTFSStation, GTFSTripLeg, ParseGTFS,
+    GTFSRouteId, GTFSService, GTFSServiceId, GTFSStation, GTFSTripLeg, ParseGTFS,
     parser::{stations::GTFSStationParser, trips::GTFSTripsParser},
 };
 
@@ -42,6 +44,8 @@ impl From<std::io::Error> for GTFSParseError {
 pub struct GTFSParser {
     stations: Vec<GTFSStation>,
     trips: Vec<GTFSTripLeg>,
+    services: Vec<GTFSService>,
+    services_by_route: HashMap<GTFSRouteId, Vec<GTFSServiceId>>,
 }
 
 impl GTFSParser {
@@ -56,9 +60,15 @@ impl GTFSParser {
         let stop_times = read("stop_times.txt")?;
 
         let stations = GTFSStationParser::from(stops).stations()?;
-        let trips = GTFSTripsParser::new(trips_file, calendar_dates, stop_times).trips()?;
+        let (trips, services, services_by_route) =
+            GTFSTripsParser::new(trips_file, calendar_dates, stop_times).parse()?;
 
-        Ok(Self { stations, trips })
+        Ok(Self {
+            stations,
+            trips,
+            services,
+            services_by_route,
+        })
     }
 }
 
@@ -66,16 +76,20 @@ impl ParseGTFS for GTFSParser {
     fn trips(&self) -> &[GTFSTripLeg] {
         &self.trips
     }
-
     fn stations(&self) -> &[GTFSStation] {
         &self.stations
+    }
+    fn schedules(&self) -> &[GTFSService] {
+        &self.services
+    }
+    fn schedules_by_route(&self) -> &HashMap<GTFSRouteId, Vec<GTFSServiceId>> {
+        &self.services_by_route
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
-    use chrono_tz::Europe::Paris;
+
     use pretty_assertions::assert_eq;
     use std::fs;
 
@@ -117,14 +131,6 @@ mod tests {
         .unwrap();
     }
 
-    fn paris_timestamp(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32) -> usize {
-        let dt = NaiveDateTime::new(
-            NaiveDate::from_ymd_opt(y, mo, d).unwrap(),
-            NaiveTime::from_hms_opt(h, mi, s).unwrap(),
-        );
-        Paris.from_local_datetime(&dt).single().unwrap().timestamp() as usize
-    }
-
     #[test]
     fn test_parse_returns_stations_and_trips() {
         let dir = std::env::temp_dir().join("gtfs_parser_test");
@@ -162,11 +168,8 @@ mod tests {
                 GTFSRouteId::from("ROUTE1".to_string()),
                 GTFSStopId::from("StopPoint:PARIS_TGV".to_string()),
                 GTFSStopId::from("StopPoint:LYON_MAIN".to_string()),
-                // TODO: fix to test non zero time
-                0,
-                0,
-                // paris_timestamp(2026, 2, 25, 10, 0, 0),
-                // paris_timestamp(2026, 2, 25, 12, 0, 0),
+                10 * 3600, // 10h00
+                12 * 3600, // 12h00
             )]
         );
     }

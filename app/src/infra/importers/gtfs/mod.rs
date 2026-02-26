@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use derive_more::{Constructor, From};
 
 pub mod importer;
@@ -6,6 +8,8 @@ pub mod parser;
 pub trait ParseGTFS {
     fn stations(&self) -> &[GTFSStation];
     fn trips(&self) -> &[GTFSTripLeg];
+    fn schedules(&self) -> &[GTFSService];
+    fn schedules_by_route(&self) -> &HashMap<GTFSRouteId, Vec<GTFSServiceId>>;
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
@@ -48,7 +52,7 @@ impl GTFSStation {
 pub struct GTFSServiceId(String);
 
 /// A `GTFSSchedule` represents a set of dates for which a train will run.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Constructor)]
 pub struct GTFSService {
     id: GTFSServiceId,
     dates: Vec<String>,

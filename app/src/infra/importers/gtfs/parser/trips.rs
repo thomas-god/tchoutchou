@@ -1,12 +1,9 @@
 use std::collections::HashMap;
 
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
-use chrono_tz::Europe::Paris;
-
 use derive_more::Constructor;
 
 use crate::infra::importers::gtfs::{
-    GTFSRouteId, GTFSServiceId, GTFSStopId, GTFSTripId, parser::GTFSTripLeg,
+    GTFSRouteId, GTFSService, GTFSServiceId, GTFSStopId, GTFSTripId, parser::GTFSTripLeg,
 };
 
 use super::GTFSParseError;
@@ -75,7 +72,16 @@ impl GTFSTripsParser {
         }
     }
 
-    pub fn trips(&self) -> Result<Vec<GTFSTripLeg>, GTFSParseError> {
+    pub fn parse(
+        &self,
+    ) -> Result<
+        (
+            Vec<GTFSTripLeg>,
+            Vec<GTFSService>,
+            HashMap<GTFSRouteId, Vec<GTFSServiceId>>,
+        ),
+        GTFSParseError,
+    > {
         let header = self.stop_times_header()?;
         let mut rows = self.stop_times.split('\n');
         let _ = rows.next();
@@ -123,7 +129,7 @@ impl GTFSTripsParser {
         }
 
         let trip_route_service_map = self.trip_route_service_map()?;
-        let dates_by_service = self.dates_by_service()?;
+        let services = self.services()?;
 
         // For each trip/route, compute all stop combinations
         let mut trips = vec![];
@@ -146,16 +152,7 @@ impl GTFSTripsParser {
             }
         }
 
-        Ok(trips)
-    }
-
-    fn parse_timestamp(date: &str, time: &str) -> Option<usize> {
-        let naive_date = NaiveDate::parse_from_str(date.trim(), "%Y%m%d").ok()?;
-        let naive_time = NaiveTime::parse_from_str(time.trim(), "%H:%M:%S").ok()?;
-        let naive_dt = NaiveDateTime::new(naive_date, naive_time);
-        // TODO: tz should be found in agency.txt
-        let dt = Paris.from_local_datetime(&naive_dt).single()?;
-        Some(dt.timestamp() as usize)
+        Ok((trips, services, trip_route_service_map.services_by_route))
     }
 
     fn trip_route_service_map(&self) -> Result<TripRouteServiceMap, GTFSParseError> {
@@ -190,7 +187,7 @@ impl GTFSTripsParser {
         Ok(TripRouteServiceMap::new(route_by_trip, services_by_route))
     }
 
-    fn dates_by_service(&self) -> Result<HashMap<GTFSServiceId, Vec<String>>, GTFSParseError> {
+    fn services(&self) -> Result<Vec<GTFSService>, GTFSParseError> {
         let header = self.calendar_dates_header()?;
         let mut rows = self.calendar_dates.split('\n');
         let _ = rows.next();
@@ -218,7 +215,10 @@ impl GTFSTripsParser {
             }
         }
 
-        Ok(map)
+        Ok(map
+            .into_iter()
+            .map(|(id, dates)| GTFSService::new(id, dates))
+            .collect())
     }
 
     fn trips_header(&self) -> Result<TripsHeader, GTFSParseError> {
@@ -301,9 +301,70 @@ impl GTFSTripsParser {
     }
 }
 
-/// Parse input time `mm:hh:ss` into duration from start of day in seconds.
+/// Parse input time `hh:mm:ss` into duration from start of day in seconds.
+/// GTFS allows hours ≥ 24 for trips running past midnight (e.g. `25:30:00`).
+/// Returns 0 for malformed input.
 fn parse_time_to_duration(time: &str) -> usize {
-    0
+    let parts: Vec<&str> = time.trim().split(':').collect();
+    if parts.len() != 3 {
+        return 0;
+    }
+    let Ok(hours) = parts[0].parse::<usize>() else {
+        return 0;
+    };
+    let Ok(minutes) = parts[1].parse::<usize>() else {
+        return 0;
+    };
+    let Ok(seconds) = parts[2].parse::<usize>() else {
+        return 0;
+    };
+    hours * 3600 + minutes * 60 + seconds
+}
+
+#[cfg(test)]
+mod test_parse_time_to_duration {
+    use super::parse_time_to_duration;
+
+    #[test]
+    fn test_zero() {
+        assert_eq!(parse_time_to_duration("00:00:00"), 0);
+    }
+
+    #[test]
+    fn test_hours_and_minutes() {
+        assert_eq!(parse_time_to_duration("09:16:00"), 9 * 3600 + 16 * 60);
+    }
+
+    #[test]
+    fn test_hours_minutes_seconds() {
+        assert_eq!(parse_time_to_duration("09:16:30"), 9 * 3600 + 16 * 60 + 30);
+    }
+
+    #[test]
+    fn test_past_midnight_gtfs() {
+        // GTFS encodes times past midnight as 25:xx:xx
+        assert_eq!(parse_time_to_duration("25:30:00"), 25 * 3600 + 30 * 60);
+    }
+
+    #[test]
+    fn test_leading_whitespace_trimmed() {
+        assert_eq!(parse_time_to_duration(" 09:16:00"), 9 * 3600 + 16 * 60);
+    }
+
+    #[test]
+    fn test_malformed_returns_zero() {
+        assert_eq!(parse_time_to_duration("BADTIME"), 0);
+    }
+
+    #[test]
+    fn test_too_few_parts_returns_zero() {
+        assert_eq!(parse_time_to_duration("09:16"), 0);
+    }
+
+    #[test]
+    fn test_non_numeric_part_returns_zero() {
+        assert_eq!(parse_time_to_duration("09:XX:00"), 0);
+    }
 }
 
 #[cfg(test)]
@@ -352,7 +413,8 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
 OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:87713040:10:1112:20260714,09:28:00,09:30:00,StopPoint:OCETrain TER-87721282,1,,0,0,
 OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:87713040:10:1112:20260714,09:38:00,09:39:00,StopPoint:OCETrain TER-87721332,2,,0,0,".to_string());
 
-        let mut trips = parser.trips().expect("trips() should succeed");
+        let (mut trips, schedules, schedules_by_route) =
+            parser.parse().expect("trips() should succeed");
 
         let mut expected_trips = vec![
             // A -> B
@@ -382,7 +444,19 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
         ];
         expected_trips.sort();
         trips.sort();
-        assert_eq!(trips, expected_trips)
+        assert_eq!(trips, expected_trips);
+
+        let expected_schedules = vec![GTFSService::new(
+            GTFSServiceId::from("000071".to_string()),
+            vec!["20260501".to_string(), "20260508".to_string()],
+        )];
+        assert_eq!(schedules, expected_schedules);
+
+        let expected_schedules_by_route = HashMap::from_iter(vec![(
+            GTFSRouteId::from("FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084:".to_string()),
+            vec![GTFSServiceId::from("000071".to_string())],
+        )]);
+        assert_eq!(schedules_by_route, expected_schedules_by_route)
     }
 
     // ── fully missing data ───────────────────────────────────────────────────
@@ -390,7 +464,7 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
     #[test]
     fn test_all_files_empty() {
         let parser = GTFSTripsParser::new(String::new(), String::new(), String::new());
-        assert!(parser.trips().is_err());
+        assert!(parser.parse().is_err());
     }
 
     #[test]
@@ -400,7 +474,7 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
             valid_calendar_dates().to_string(),
             String::new(),
         );
-        assert!(parser.trips().is_err());
+        assert!(parser.parse().is_err());
     }
 
     #[test]
@@ -411,7 +485,7 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
             valid_calendar_dates().to_string(),
             valid_stop_times_two_stops().to_string(),
         );
-        assert!(parser.trips().is_err());
+        assert!(parser.parse().is_err());
     }
 
     #[test]
@@ -422,12 +496,21 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
             String::new(),
             valid_stop_times_two_stops().to_string(),
         );
-        assert!(parser.trips().is_err());
+        assert!(parser.parse().is_err());
     }
 
     // ── missing required header columns ──────────────────────────────────────
 
-    fn missing_col_name(result: Result<Vec<GTFSTripLeg>, GTFSParseError>) -> String {
+    fn missing_col_name(
+        result: Result<
+            (
+                Vec<GTFSTripLeg>,
+                Vec<GTFSService>,
+                HashMap<GTFSRouteId, Vec<GTFSServiceId>>,
+            ),
+            GTFSParseError,
+        >,
+    ) -> String {
         match result.unwrap_err() {
             GTFSParseError::MissingColumn(col) => col,
             other => panic!("expected MissingColumn, got {other:?}"),
@@ -444,7 +527,7 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
             valid_calendar_dates().to_string(),
             stop_times_bad_header.to_string(),
         );
-        assert!(parser.trips().is_err());
+        assert!(parser.parse().is_err());
     }
 
     #[test]
@@ -455,7 +538,7 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
                 valid_calendar_dates().to_string(),
                 "trip_id,arrival_time,departure_time,stop_id\n".to_string(),
             )
-            .trips(),
+            .parse(),
         );
         assert_eq!(col, "stop_sequence");
     }
@@ -469,7 +552,7 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
             valid_calendar_dates().to_string(),
             valid_stop_times_two_stops().to_string(),
         );
-        assert!(parser.trips().is_err());
+        assert!(parser.parse().is_err());
     }
 
     #[test]
@@ -480,7 +563,7 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
                 valid_calendar_dates().to_string(),
                 valid_stop_times_two_stops().to_string(),
             )
-            .trips(),
+            .parse(),
         );
         assert_eq!(col, "trip_id");
     }
@@ -494,7 +577,7 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
             calendar_bad_header.to_string(),
             valid_stop_times_two_stops().to_string(),
         );
-        assert!(parser.trips().is_err());
+        assert!(parser.parse().is_err());
     }
 
     #[test]
@@ -505,7 +588,7 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
                 "service_id,date\n".to_string(),
                 valid_stop_times_two_stops().to_string(),
             )
-            .trips(),
+            .parse(),
         );
         assert_eq!(col, "exception_type");
     }
@@ -525,7 +608,7 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
             stop_times.to_string(),
         );
         // Only STOP_A and STOP_C are valid → one trip pair expected
-        let trips = parser.trips().unwrap();
+        let (trips, _, _) = parser.parse().unwrap();
         assert_eq!(trips.len(), 1);
         assert_eq!(trips[0].origin, GTFSStopId::from("STOP_A".to_string()));
         assert_eq!(trips[0].destination, GTFSStopId::from("STOP_C".to_string()));
@@ -543,7 +626,7 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
             valid_calendar_dates().to_string(),
             stop_times.to_string(),
         );
-        let trips = parser.trips().unwrap();
+        let (trips, _, _) = parser.parse().unwrap();
         assert_eq!(trips.len(), 1);
         assert_eq!(trips[0].origin, GTFSStopId::from("STOP_A".to_string()));
         assert_eq!(trips[0].destination, GTFSStopId::from("STOP_C".to_string()));
@@ -615,7 +698,8 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
             valid_stop_times_two_stops().to_string(),
         );
         // Only one date active → one pair of stops → one trip
-        assert_eq!(parser.trips().unwrap().len(), 1);
+        let (trips, _, _) = parser.parse().unwrap();
+        assert_eq!(trips.len(), 1);
     }
 
     // ── edge cases ───────────────────────────────────────────────────────────
@@ -628,7 +712,8 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
             valid_calendar_dates().to_string(),
             valid_stop_times_one_stop().to_string(),
         );
-        assert_eq!(parser.trips().unwrap(), vec![]);
+        let (trips, _, _) = parser.parse().unwrap();
+        assert!(trips.is_empty());
     }
 
     #[test]
@@ -639,6 +724,7 @@ OCESN117756F1187_F:TER:FR:Line::B10C45A0-C32C-4232-85F2-4BB81B810084::87723197:8
             "service_id,date,exception_type".to_string(),
             "trip_id,arrival_time,departure_time,stop_id,stop_sequence".to_string(),
         );
-        assert_eq!(parser.trips().unwrap(), vec![]);
+        let (trips, _, _) = parser.parse().unwrap();
+        assert!(trips.is_empty());
     }
 }

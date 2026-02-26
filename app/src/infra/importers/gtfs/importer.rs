@@ -66,7 +66,7 @@ fn reconcile_trips(stations: &[GTFSStation], trips: &[GTFSTripLeg]) -> Vec<Impor
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::importers::gtfs::GTFSRouteId;
+    use crate::infra::importers::gtfs::{GTFSRouteId, GTFSService, GTFSServiceId};
 
     use super::*;
 
@@ -99,6 +99,8 @@ mod tests {
     struct StubParser {
         stations: Vec<GTFSStation>,
         trips: Vec<GTFSTripLeg>,
+        services: Vec<GTFSService>,
+        services_by_route: HashMap<GTFSRouteId, Vec<GTFSServiceId>>,
     }
 
     impl ParseGTFS for StubParser {
@@ -107,6 +109,12 @@ mod tests {
         }
         fn trips(&self) -> &[GTFSTripLeg] {
             &self.trips
+        }
+        fn schedules(&self) -> &[GTFSService] {
+            &self.services
+        }
+        fn schedules_by_route(&self) -> &HashMap<GTFSRouteId, Vec<GTFSServiceId>> {
+            &self.services_by_route
         }
     }
 
@@ -118,6 +126,8 @@ mod tests {
                 station("S2", "Lyon Perrache", vec![stop("S2-A")]),
             ],
             trips: vec![],
+            services: vec![],
+            services_by_route: HashMap::new(),
         };
         let mut result = GTFSImporter::from_parser(&parser).stations();
         result.sort_by_key(|s| s.id().clone());
@@ -152,6 +162,8 @@ mod tests {
             ],
             // Trip uses stop S1-B (child of S1) → stop S2-A (child of S2)
             trips: vec![trip(route("R1"), stop("S1-B"), stop("S2-A"), 800, 1200)],
+            services: vec![],
+            services_by_route: HashMap::new(),
         };
         let result = GTFSImporter::from_parser(&parser).trips();
 
@@ -174,6 +186,8 @@ mod tests {
             stations: vec![station("S1", "Paris Nord", vec![stop("S1-A")])],
             // S2-X belongs to no station
             trips: vec![trip(route("R1"), stop("S1-A"), stop("S2-X"), 800, 1200)],
+            services: vec![],
+            services_by_route: HashMap::new(),
         };
         let result = GTFSImporter::from_parser(&parser).trips();
 
@@ -191,6 +205,8 @@ mod tests {
                 trip(route("R1"), stop("S1-A"), stop("S2-A"), 800, 1200),
                 trip(route("R1"), stop("S1-B"), stop("S2-B"), 900, 1300),
             ],
+            services: vec![],
+            services_by_route: HashMap::new(),
         };
         let mut result = GTFSImporter::from_parser(&parser).trips();
         result.sort();
