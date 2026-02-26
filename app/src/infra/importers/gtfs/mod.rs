@@ -5,7 +5,7 @@ pub mod parser;
 
 pub trait ParseGTFS {
     fn stations(&self) -> &[GTFSStation];
-    fn trips(&self) -> &[GTFSTrip];
+    fn trips(&self) -> &[GTFSTripLeg];
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
@@ -44,15 +44,37 @@ impl GTFSStation {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, PartialOrd, From, Hash, Eq, Ord)]
+pub struct GTFSServiceId(String);
+
+/// A `GTFSSchedule` represents a set of dates for which a train will run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GTFSService {
+    id: GTFSServiceId,
+    dates: Vec<String>,
+}
+
+/// A `GTFSRouteId` represent a set of stops that belong to the same physical train and trip. It can
+/// be used amongst other things to find the `GTFSSchedule`s for a given `GTFSTrip`.
+#[derive(Debug, Clone, PartialEq, PartialOrd, From, Hash, Eq, Ord)]
+pub struct GTFSRouteId(String);
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, From, Hash, Eq, Ord)]
+pub struct GTFSTripId(String);
+
 #[derive(Debug, Clone, Constructor, PartialEq, PartialOrd, Eq, Ord)]
-pub struct GTFSTrip {
+pub struct GTFSTripLeg {
+    route: GTFSRouteId,
     origin: GTFSStopId,
     destination: GTFSStopId,
     departure: usize,
     arrival: usize,
 }
 
-impl GTFSTrip {
+impl GTFSTripLeg {
+    pub fn route(&self) -> &GTFSRouteId {
+        &self.route
+    }
     pub fn origin(&self) -> &GTFSStopId {
         &self.origin
     }
@@ -68,6 +90,12 @@ impl GTFSTrip {
 }
 
 impl GTFSStationId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl GTFSRouteId {
     pub fn as_str(&self) -> &str {
         &self.0
     }

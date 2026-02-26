@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use crate::infra::importers::{ImportedStation, ImportedStationId, ImportedTrip};
+use crate::app::schedule::{ImportedRouteId, ImportedStation, ImportedStationId, ImportedTrip};
 
-use super::{GTFSStation, GTFSStationId, GTFSStopId, GTFSTrip, ParseGTFS};
+use super::{GTFSStation, GTFSStationId, GTFSStopId, GTFSTripLeg, ParseGTFS};
 
 pub struct GTFSImporter {
     stations: Vec<GTFSStation>,
-    trips: Vec<GTFSTrip>,
+    trips: Vec<GTFSTripLeg>,
 }
 
 impl GTFSImporter {
@@ -40,7 +40,7 @@ fn reconcile_stations(stations: &[GTFSStation]) -> Vec<ImportedStation> {
         .collect()
 }
 
-fn reconcile_trips(stations: &[GTFSStation], trips: &[GTFSTrip]) -> Vec<ImportedTrip> {
+fn reconcile_trips(stations: &[GTFSStation], trips: &[GTFSTripLeg]) -> Vec<ImportedTrip> {
     // Build a reverse map: GTFSStopId → GTFSStationId, because GTFSTrip references
     // stops while ImportedTrip references stations.
     let stop_to_station: HashMap<&GTFSStopId, &GTFSStationId> = stations
@@ -54,6 +54,7 @@ fn reconcile_trips(stations: &[GTFSStation], trips: &[GTFSTrip]) -> Vec<Imported
             let origin_station = stop_to_station.get(trip.origin())?;
             let destination_station = stop_to_station.get(trip.destination())?;
             Some(ImportedTrip::new(
+                ImportedRouteId::from(trip.route().as_str().to_owned()),
                 ImportedStationId::from(origin_station.as_str().to_owned()),
                 ImportedStationId::from(destination_station.as_str().to_owned()),
                 trip.departure(),
@@ -65,10 +66,16 @@ fn reconcile_trips(stations: &[GTFSStation], trips: &[GTFSTrip]) -> Vec<Imported
 
 #[cfg(test)]
 mod tests {
+    use crate::infra::importers::gtfs::GTFSRouteId;
+
     use super::*;
 
     fn stop(id: &str) -> GTFSStopId {
         GTFSStopId::from(id.to_owned())
+    }
+
+    fn route(id: &str) -> GTFSRouteId {
+        GTFSRouteId::from(id.to_owned())
     }
 
     fn station_id(id: &str) -> GTFSStationId {
@@ -79,20 +86,26 @@ mod tests {
         GTFSStation::new(station_id(id), name.to_owned(), 0.0, 0.0, stops)
     }
 
-    fn trip(origin: GTFSStopId, destination: GTFSStopId, dep: usize, arr: usize) -> GTFSTrip {
-        GTFSTrip::new(origin, destination, dep, arr)
+    fn trip(
+        route: GTFSRouteId,
+        origin: GTFSStopId,
+        destination: GTFSStopId,
+        dep: usize,
+        arr: usize,
+    ) -> GTFSTripLeg {
+        GTFSTripLeg::new(route, origin, destination, dep, arr)
     }
 
     struct StubParser {
         stations: Vec<GTFSStation>,
-        trips: Vec<GTFSTrip>,
+        trips: Vec<GTFSTripLeg>,
     }
 
     impl ParseGTFS for StubParser {
         fn stations(&self) -> &[GTFSStation] {
             &self.stations
         }
-        fn trips(&self) -> &[GTFSTrip] {
+        fn trips(&self) -> &[GTFSTripLeg] {
             &self.trips
         }
     }
@@ -138,7 +151,7 @@ mod tests {
                 station("S2", "Lyon Perrache", vec![stop("S2-A")]),
             ],
             // Trip uses stop S1-B (child of S1) → stop S2-A (child of S2)
-            trips: vec![trip(stop("S1-B"), stop("S2-A"), 800, 1200)],
+            trips: vec![trip(route("R1"), stop("S1-B"), stop("S2-A"), 800, 1200)],
         };
         let result = GTFSImporter::from_parser(&parser).trips();
 
@@ -146,6 +159,7 @@ mod tests {
         assert_eq!(
             result[0],
             ImportedTrip::new(
+                ImportedRouteId::from("R1".to_owned()),
                 ImportedStationId::from("S1".to_owned()),
                 ImportedStationId::from("S2".to_owned()),
                 800,
@@ -159,7 +173,7 @@ mod tests {
         let parser = StubParser {
             stations: vec![station("S1", "Paris Nord", vec![stop("S1-A")])],
             // S2-X belongs to no station
-            trips: vec![trip(stop("S1-A"), stop("S2-X"), 800, 1200)],
+            trips: vec![trip(route("R1"), stop("S1-A"), stop("S2-X"), 800, 1200)],
         };
         let result = GTFSImporter::from_parser(&parser).trips();
 
@@ -174,8 +188,8 @@ mod tests {
                 station("S2", "Lyon Perrache", vec![stop("S2-A"), stop("S2-B")]),
             ],
             trips: vec![
-                trip(stop("S1-A"), stop("S2-A"), 800, 1200),
-                trip(stop("S1-B"), stop("S2-B"), 900, 1300),
+                trip(route("R1"), stop("S1-A"), stop("S2-A"), 800, 1200),
+                trip(route("R1"), stop("S1-B"), stop("S2-B"), 900, 1300),
             ],
         };
         let mut result = GTFSImporter::from_parser(&parser).trips();
