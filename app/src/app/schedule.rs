@@ -139,15 +139,10 @@ impl<R: TrainDataRepository> ScheduleService<R> {
     }
 
     /// Feed stations, schedules and trips from any importer into the repository.
-    pub fn ingest(
-        &mut self,
-        stations: &[ImportedStation],
-        schedules: &[ImportedSchedule],
-        trips: &[ImportedTripLeg],
-    ) {
-        self.repository.save_schedules(schedules);
-        self.repository.save_stations(stations);
-        self.repository.save_trips(trips);
+    pub fn ingest(&mut self, importer: &impl ImportTrainData) {
+        self.repository.save_schedules(importer.schedules());
+        self.repository.save_stations(importer.stations());
+        self.repository.save_trips(importer.trip_legs());
     }
 
     /// Build a [`Graph`] from everything currently held by the repository.
@@ -190,14 +185,14 @@ mod tests {
 
     use super::*;
 
-    struct InMemoryRepository {
+    struct InMemoryTestRepository {
         stations: Vec<ImportedStation>,
         schedules: Vec<ImportedSchedule>,
         trips: Vec<ImportedTripLeg>,
         schedules_by_route: HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
     }
 
-    impl InMemoryRepository {
+    impl InMemoryTestRepository {
         fn empty() -> Self {
             Self {
                 stations: vec![],
@@ -208,7 +203,7 @@ mod tests {
         }
     }
 
-    impl TrainDataRepository for InMemoryRepository {
+    impl TrainDataRepository for InMemoryTestRepository {
         fn save_stations(&mut self, stations: &[ImportedStation]) {
             self.stations.extend_from_slice(stations);
         }
@@ -258,6 +253,32 @@ mod tests {
         ImportedStationId::from(id.to_owned())
     }
 
+    #[derive(Debug, Clone, Constructor)]
+    struct TestImporter {
+        stations: Vec<ImportedStation>,
+        trips: Vec<ImportedTripLeg>,
+        schedules: Vec<ImportedSchedule>,
+        schedules_by_route: HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
+    }
+
+    impl ImportTrainData for TestImporter {
+        fn stations(&self) -> &[ImportedStation] {
+            &self.stations
+        }
+
+        fn trip_legs(&self) -> &[ImportedTripLeg] {
+            &self.trips
+        }
+
+        fn schedules(&self) -> &[ImportedSchedule] {
+            &self.schedules
+        }
+
+        fn schedules_by_route(&self) -> &HashMap<ImportedRouteId, Vec<ImportedScheduleId>> {
+            &self.schedules_by_route
+        }
+    }
+
     #[test]
     fn ingest_builds_graph() {
         let stations = vec![station("A"), station("B")];
@@ -272,9 +293,11 @@ mod tests {
             100,
             200,
         )];
+        let schedules_by_route = HashMap::new();
+        let importer = TestImporter::new(stations, trips, schedules, schedules_by_route);
 
-        let mut service = ScheduleService::new(InMemoryRepository::empty());
-        service.ingest(&stations, &schedules, &trips);
+        let mut service = ScheduleService::new(InMemoryTestRepository::empty());
+        service.ingest(&importer);
 
         let graph = service.graph();
         assert_eq!(graph.trips_from(StationId::from(0)).len(), 1);
@@ -282,7 +305,7 @@ mod tests {
 
     #[test]
     fn empty_repository_produces_empty_graph() {
-        let service = ScheduleService::new(InMemoryRepository::empty());
+        let service = ScheduleService::new(InMemoryTestRepository::empty());
         let graph = service.graph();
         assert_eq!(graph.trips_from(StationId::from(0)).len(), 0);
     }
@@ -302,9 +325,11 @@ mod tests {
             100,
             200,
         )];
+        let schedules_by_route = HashMap::new();
+        let importer = TestImporter::new(stations, trips, schedules, schedules_by_route);
 
-        let mut service = ScheduleService::new(InMemoryRepository::empty());
-        service.ingest(&stations, &schedules, &trips);
+        let mut service = ScheduleService::new(InMemoryTestRepository::empty());
+        service.ingest(&importer);
 
         let graph = service.graph();
         assert_eq!(graph.trips_from(StationId::from(0)).len(), 0);
@@ -326,9 +351,11 @@ mod tests {
             100,
             200,
         )];
+        let schedules_by_route = HashMap::new();
+        let importer = TestImporter::new(stations, trips, schedules, schedules_by_route);
 
-        let mut service = ScheduleService::new(InMemoryRepository::empty());
-        service.ingest(&stations, &schedules, &trips);
+        let mut service = ScheduleService::new(InMemoryTestRepository::empty());
+        service.ingest(&importer);
 
         let graph = service.graph();
         assert_eq!(graph.trips_from(StationId::from(0)).len(), 0);
@@ -346,9 +373,11 @@ mod tests {
             ImportedTripLeg::new(route("R1"), sid("A"), sid("C"), 300, 400),
             ImportedTripLeg::new(route("R1"), sid("A"), sid("B"), 500, 600),
         ];
+        let schedules_by_route = HashMap::new();
+        let importer = TestImporter::new(stations, trips, schedules, schedules_by_route);
 
-        let mut service = ScheduleService::new(InMemoryRepository::empty());
-        service.ingest(&stations, &schedules, &trips);
+        let mut service = ScheduleService::new(InMemoryTestRepository::empty());
+        service.ingest(&importer);
 
         let graph = service.graph();
         assert_eq!(graph.trips_from(StationId::from(0)).len(), 3);
