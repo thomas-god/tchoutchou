@@ -1,5 +1,5 @@
 use crate::infra::importers::gtfs::{
-    GTFSRawCalendarDate, GTFSRawStop, GTFSRawStopTime, GTFSRawTrip, ParseGTFS,
+    GTFSCalendarDate, GTFSStop, GTFSStopTime, GTFSTrip, ParseGTFS,
 };
 
 use self::{
@@ -46,10 +46,10 @@ impl From<std::io::Error> for GTFSParseError {
 
 #[derive(Debug)]
 pub struct GTFSParser {
-    stops: Vec<GTFSRawStop>,
-    stop_times: Vec<GTFSRawStopTime>,
-    trips: Vec<GTFSRawTrip>,
-    calendar_dates: Vec<GTFSRawCalendarDate>,
+    stops: Vec<GTFSStop>,
+    stop_times: Vec<GTFSStopTime>,
+    trips: Vec<GTFSTrip>,
+    calendar_dates: Vec<GTFSCalendarDate>,
 }
 
 impl GTFSParser {
@@ -73,16 +73,16 @@ impl GTFSParser {
 }
 
 impl ParseGTFS for GTFSParser {
-    fn stops(&self) -> &[GTFSRawStop] {
+    fn stops(&self) -> &[GTFSStop] {
         &self.stops
     }
-    fn stop_times(&self) -> &[GTFSRawStopTime] {
+    fn stop_times(&self) -> &[GTFSStopTime] {
         &self.stop_times
     }
-    fn trips(&self) -> &[GTFSRawTrip] {
+    fn trips(&self) -> &[GTFSTrip] {
         &self.trips
     }
-    fn calendar_dates(&self) -> &[GTFSRawCalendarDate] {
+    fn calendar_dates(&self) -> &[GTFSCalendarDate] {
         &self.calendar_dates
     }
 }
@@ -93,10 +93,10 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::fs;
 
-    use crate::app::schedule::{
-        ImportTrainData, ImportedRouteId, ImportedStation, ImportedStationId, ImportedTrip,
+    use crate::infra::importers::gtfs::{
+        GTFSCalendarDate, GTFSExceptionType, GTFSLocationType, GTFSRouteId, GTFSServiceId,
+        GTFSStop, GTFSStopId, GTFSStopTime, GTFSTrip, GTFSTripId,
     };
-    use crate::infra::importers::gtfs::importer::GTFSImporter;
 
     use super::*;
 
@@ -135,45 +135,87 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_returns_stations_and_trips() {
+    fn test_parse_reads_rows_from_all_files() {
         let dir = std::env::temp_dir().join("gtfs_parser_test");
         fs::create_dir_all(&dir).unwrap();
         write_gtfs_fixture(&dir);
 
         let parser = GTFSParser::parse(dir.to_str().unwrap()).expect("parse should succeed");
-        let importer = GTFSImporter::from_parser(&parser);
 
-        let mut stations = importer.stations().to_vec();
-        stations.sort_by_key(|s| s.id().clone());
         assert_eq!(
-            stations,
-            vec![
-                ImportedStation::new(
-                    ImportedStationId::from("StopArea:LYON".to_string()),
-                    "Lyon Part-Dieu".to_string(),
-                    45.7605,
-                    4.8597,
-                ),
-                ImportedStation::new(
-                    ImportedStationId::from("StopArea:PARIS".to_string()),
+            parser.stops(),
+            &[
+                GTFSStop::new(
+                    GTFSStopId::from("StopArea:PARIS".to_string()),
                     "Paris Gare de Lyon".to_string(),
                     48.8448,
                     2.3735,
+                    GTFSLocationType::Station,
+                    None,
+                ),
+                GTFSStop::new(
+                    GTFSStopId::from("StopPoint:PARIS_TGV".to_string()),
+                    "Paris Gare de Lyon TGV".to_string(),
+                    48.8448,
+                    2.3735,
+                    GTFSLocationType::Stop,
+                    Some(GTFSStopId::from("StopArea:PARIS".to_string())),
+                ),
+                GTFSStop::new(
+                    GTFSStopId::from("StopArea:LYON".to_string()),
+                    "Lyon Part-Dieu".to_string(),
+                    45.7605,
+                    4.8597,
+                    GTFSLocationType::Station,
+                    None,
+                ),
+                GTFSStop::new(
+                    GTFSStopId::from("StopPoint:LYON_MAIN".to_string()),
+                    "Lyon Part-Dieu Main".to_string(),
+                    45.7605,
+                    4.8597,
+                    GTFSLocationType::Stop,
+                    Some(GTFSStopId::from("StopArea:LYON".to_string())),
                 ),
             ]
         );
 
-        let mut trips = importer.trip_legs().to_vec();
-        trips.sort();
         assert_eq!(
-            trips,
-            vec![ImportedTrip::new(
-                ImportedRouteId::from("ROUTE1".to_string()),
-                ImportedStationId::from("StopArea:PARIS".to_string()),
-                ImportedStationId::from("StopArea:LYON".to_string()),
-                10 * 3600, // 10h00
-                12 * 3600, // 12h00
+            parser.trips(),
+            &[GTFSTrip::new(
+                GTFSTripId::from("TRIP1".to_string()),
+                GTFSRouteId::from("ROUTE1".to_string()),
+                GTFSServiceId::from("SVC1".to_string()),
             )]
+        );
+
+        assert_eq!(
+            parser.calendar_dates(),
+            &[GTFSCalendarDate::new(
+                GTFSServiceId::from("SVC1".to_string()),
+                "20260225".to_string(),
+                GTFSExceptionType::ServiceAdded,
+            )]
+        );
+
+        assert_eq!(
+            parser.stop_times(),
+            &[
+                GTFSStopTime::new(
+                    GTFSTripId::from("TRIP1".to_string()),
+                    10 * 3600,
+                    10 * 3600,
+                    GTFSStopId::from("StopPoint:PARIS_TGV".to_string()),
+                    0,
+                ),
+                GTFSStopTime::new(
+                    GTFSTripId::from("TRIP1".to_string()),
+                    12 * 3600,
+                    12 * 3600,
+                    GTFSStopId::from("StopPoint:LYON_MAIN".to_string()),
+                    1,
+                ),
+            ]
         );
     }
 

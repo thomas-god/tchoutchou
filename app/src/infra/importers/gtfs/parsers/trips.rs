@@ -1,5 +1,5 @@
 use crate::infra::importers::gtfs::{
-    GTFSRawTrip, GTFSRouteId, GTFSServiceId, GTFSTripId, parser::GTFSParseError,
+    GTFSRouteId, GTFSServiceId, GTFSTrip, GTFSTripId, parsers::GTFSParseError,
 };
 
 struct TripsHeader {
@@ -35,8 +35,7 @@ impl TripsFileParser {
         }
 
         Ok(TripsHeader {
-            trip_id: trip_id
-                .ok_or_else(|| GTFSParseError::MissingColumn("trip_id".to_string()))?,
+            trip_id: trip_id.ok_or_else(|| GTFSParseError::MissingColumn("trip_id".to_string()))?,
             route_id: route_id
                 .ok_or_else(|| GTFSParseError::MissingColumn("route_id".to_string()))?,
             service_id: service_id
@@ -44,7 +43,7 @@ impl TripsFileParser {
         })
     }
 
-    pub fn parse(&self) -> Result<Vec<GTFSRawTrip>, GTFSParseError> {
+    pub fn parse(&self) -> Result<Vec<GTFSTrip>, GTFSParseError> {
         let header = self.header()?;
         let mut rows = self.content.split('\n');
         let _ = rows.next();
@@ -53,14 +52,17 @@ impl TripsFileParser {
         for row in rows {
             let cols: Vec<&str> = row.split(',').collect();
             let (Some(trip_id), Some(route_id), Some(service_id)) = (
-                cols.get(header.trip_id).map(|v| GTFSTripId::from(v.to_string())),
-                cols.get(header.route_id).map(|v| GTFSRouteId::from(v.to_string())),
-                cols.get(header.service_id).map(|v| GTFSServiceId::from(v.to_string())),
+                cols.get(header.trip_id)
+                    .map(|v| GTFSTripId::from(v.to_string())),
+                cols.get(header.route_id)
+                    .map(|v| GTFSRouteId::from(v.to_string())),
+                cols.get(header.service_id)
+                    .map(|v| GTFSServiceId::from(v.to_string())),
             ) else {
                 continue;
             };
 
-            trips.push(GTFSRawTrip::new(trip_id, route_id, service_id));
+            trips.push(GTFSTrip::new(trip_id, route_id, service_id));
         }
 
         Ok(trips)
@@ -83,13 +85,13 @@ mod tests {
         GTFSServiceId::from(id.to_string())
     }
 
-    fn raw_trip(trip: &str, route: &str, service: &str) -> GTFSRawTrip {
-        GTFSRawTrip::new(trip_id(trip), route_id(route), svc(service))
+    fn trip(trip: &str, route: &str, service: &str) -> GTFSTrip {
+        GTFSTrip::new(trip_id(trip), route_id(route), svc(service))
     }
 
     // ── error paths ────────────────────────────────────────────────────────
 
-    fn missing_col(result: Result<Vec<GTFSRawTrip>, GTFSParseError>) -> String {
+    fn missing_col(result: Result<Vec<GTFSTrip>, GTFSParseError>) -> String {
         match result.unwrap_err() {
             GTFSParseError::MissingColumn(col) => col,
             other => panic!("expected MissingColumn, got {other:?}"),
@@ -98,25 +100,19 @@ mod tests {
 
     #[test]
     fn missing_trip_id_column() {
-        let col = missing_col(
-            TripsFileParser::from("route_id,service_id\n".to_string()).parse(),
-        );
+        let col = missing_col(TripsFileParser::from("route_id,service_id\n".to_string()).parse());
         assert_eq!(col, "trip_id");
     }
 
     #[test]
     fn missing_route_id_column() {
-        let col = missing_col(
-            TripsFileParser::from("trip_id,service_id\n".to_string()).parse(),
-        );
+        let col = missing_col(TripsFileParser::from("trip_id,service_id\n".to_string()).parse());
         assert_eq!(col, "route_id");
     }
 
     #[test]
     fn missing_service_id_column() {
-        let col = missing_col(
-            TripsFileParser::from("trip_id,route_id\n".to_string()).parse(),
-        );
+        let col = missing_col(TripsFileParser::from("trip_id,route_id\n".to_string()).parse());
         assert_eq!(col, "service_id");
     }
 
@@ -133,7 +129,7 @@ mod tests {
     fn single_row_parsed_correctly() {
         let content = "route_id,service_id,trip_id\nROUTE1,SVC1,TRIP1";
         let result = TripsFileParser::from(content.to_string()).parse().unwrap();
-        assert_eq!(result, vec![raw_trip("TRIP1", "ROUTE1", "SVC1")]);
+        assert_eq!(result, vec![trip("TRIP1", "ROUTE1", "SVC1")]);
     }
 
     #[test]
@@ -150,8 +146,7 @@ mod tests {
     #[test]
     fn extra_columns_are_ignored() {
         // Real trips.txt has many extra columns (headsign, direction_id, etc.)
-        let content =
-            "route_id,service_id,trip_id,trip_headsign,direction_id,block_id,shape_id\n\
+        let content = "route_id,service_id,trip_id,trip_headsign,direction_id,block_id,shape_id\n\
              ROUTE1,SVC1,TRIP1,Lyon Part-Dieu,0,,";
         let result = TripsFileParser::from(content.to_string()).parse().unwrap();
         assert_eq!(result.len(), 1);

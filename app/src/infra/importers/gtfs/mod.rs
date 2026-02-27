@@ -1,53 +1,19 @@
+use std::str::FromStr;
+
 use derive_more::{Constructor, From};
 
 pub mod importer;
-pub mod parser;
+pub mod parsers;
 
 /// The interface a GTFS data source must implement.
 /// Methods return flat, unprocessed rows straight from the CSV files.
 /// All semantic transformation (stop grouping, trip expansion, etc.) is the
 /// responsibility of [`importer::GTFSImporter`].
 pub trait ParseGTFS {
-    fn stops(&self) -> &[GTFSRawStop];
-    fn stop_times(&self) -> &[GTFSRawStopTime];
-    fn trips(&self) -> &[GTFSRawTrip];
-    fn calendar_dates(&self) -> &[GTFSRawCalendarDate];
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
-pub struct GTFSStationId(String);
-
-/// A station can contain several, possibly abstract, stops. For example `GTFSStationId` "Paris Gare
-/// de Lyon" can contain `GTFSStopId`s "Paris Gare de Lyon - TGV" and "Paris Gare de Lyon - OUIGO"
-/// amongst others.
-#[derive(Debug, Clone, PartialEq, PartialOrd, From, Hash, Eq, Ord)]
-pub struct GTFSStopId(String);
-
-#[derive(Debug, Clone, PartialEq, Constructor)]
-pub struct GTFSStation {
-    id: GTFSStationId,
-    name: String,
-    lat: f64,
-    lon: f64,
-    stops: Vec<GTFSStopId>,
-}
-
-impl GTFSStation {
-    pub fn id(&self) -> &GTFSStationId {
-        &self.id
-    }
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-    pub fn lat(&self) -> f64 {
-        self.lat
-    }
-    pub fn lon(&self) -> f64 {
-        self.lon
-    }
-    pub fn stops(&self) -> &[GTFSStopId] {
-        &self.stops
-    }
+    fn stops(&self) -> &[GTFSStop];
+    fn stop_times(&self) -> &[GTFSStopTime];
+    fn trips(&self) -> &[GTFSTrip];
+    fn calendar_dates(&self) -> &[GTFSCalendarDate];
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, From, Hash, Eq, Ord)]
@@ -76,45 +42,6 @@ pub struct GTFSRouteId(String);
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, From, Hash, Eq, Ord)]
 pub struct GTFSTripId(String);
-
-#[derive(Debug, Clone, Constructor, PartialEq, PartialOrd, Eq, Ord)]
-pub struct GTFSTripLeg {
-    route: GTFSRouteId,
-    origin: GTFSStopId,
-    destination: GTFSStopId,
-    departure: usize,
-    arrival: usize,
-}
-
-impl GTFSTripLeg {
-    pub fn route(&self) -> &GTFSRouteId {
-        &self.route
-    }
-    pub fn origin(&self) -> &GTFSStopId {
-        &self.origin
-    }
-    pub fn destination(&self) -> &GTFSStopId {
-        &self.destination
-    }
-    pub fn departure(&self) -> usize {
-        self.departure
-    }
-    pub fn arrival(&self) -> usize {
-        self.arrival
-    }
-}
-
-impl GTFSStationId {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl GTFSStopId {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
 
 impl GTFSServiceId {
     pub fn as_str(&self) -> &str {
@@ -145,25 +72,36 @@ pub enum GTFSLocationType {
     BoardingArea,
 }
 
-impl GTFSLocationType {
-    /// Parse the raw CSV value. An empty string is treated as `Stop` (spec default).
+impl FromStr for GTFSLocationType {
+    type Err = String;
+
+    /// Parse the CSV value. An empty string is treated as `Stop` (spec default).
     /// Returns `None` for any unrecognised value.
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.trim() {
-            "" | "0" => Some(Self::Stop),
-            "1" => Some(Self::Station),
-            "2" => Some(Self::EntranceExit),
-            "3" => Some(Self::GenericNode),
-            "4" => Some(Self::BoardingArea),
-            _ => None,
-        }
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.trim() {
+            "" | "0" => Self::Stop,
+            "1" => Self::Station,
+            "2" => Self::EntranceExit,
+            "3" => Self::GenericNode,
+            "4" => Self::BoardingArea,
+            _ => return Err(format!("Cannot parse {:?} into GTFSLocationType", s)),
+        })
     }
 }
 
-/// A single raw row from `stops.txt`, faithfully mirroring the CSV columns
+#[derive(Debug, Clone, PartialEq, PartialOrd, From, Hash, Eq, Ord)]
+pub struct GTFSStopId(String);
+
+impl GTFSStopId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A single row from `stops.txt`, faithfully mirroring the CSV columns
 /// without any grouping or semantic interpretation.
-#[derive(Debug, Clone, PartialEq)]
-pub struct GTFSRawStop {
+#[derive(Debug, Clone, PartialEq, Constructor)]
+pub struct GTFSStop {
     id: GTFSStopId,
     name: String,
     lat: f64,
@@ -174,24 +112,7 @@ pub struct GTFSRawStop {
     parent_station: Option<GTFSStopId>,
 }
 
-impl GTFSRawStop {
-    pub fn new(
-        id: GTFSStopId,
-        name: String,
-        lat: f64,
-        lon: f64,
-        location_type: GTFSLocationType,
-        parent_station: Option<GTFSStopId>,
-    ) -> Self {
-        Self {
-            id,
-            name,
-            lat,
-            lon,
-            location_type,
-            parent_station,
-        }
-    }
+impl GTFSStop {
     pub fn id(&self) -> &GTFSStopId {
         &self.id
     }
@@ -212,9 +133,9 @@ impl GTFSRawStop {
     }
 }
 
-/// A single raw row from `stop_times.txt`.
+/// A single row from `stop_times.txt`.
 #[derive(Debug, Clone, PartialEq)]
-pub struct GTFSRawStopTime {
+pub struct GTFSStopTime {
     trip_id: GTFSTripId,
     arrival: usize,
     departure: usize,
@@ -222,7 +143,7 @@ pub struct GTFSRawStopTime {
     stop_sequence: usize,
 }
 
-impl GTFSRawStopTime {
+impl GTFSStopTime {
     pub fn new(
         trip_id: GTFSTripId,
         arrival: usize,
@@ -255,15 +176,15 @@ impl GTFSRawStopTime {
     }
 }
 
-/// A single raw row from `trips.txt`.
+/// A single row from `trips.txt`.
 #[derive(Debug, Clone, PartialEq)]
-pub struct GTFSRawTrip {
+pub struct GTFSTrip {
     trip_id: GTFSTripId,
     route_id: GTFSRouteId,
     service_id: GTFSServiceId,
 }
 
-impl GTFSRawTrip {
+impl GTFSTrip {
     pub fn new(trip_id: GTFSTripId, route_id: GTFSRouteId, service_id: GTFSServiceId) -> Self {
         Self {
             trip_id,
@@ -293,26 +214,28 @@ pub enum GTFSExceptionType {
     ServiceRemoved,
 }
 
-impl GTFSExceptionType {
-    /// Parse the raw CSV value. Returns `None` for any unrecognised value.
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.trim() {
-            "1" => Some(Self::ServiceAdded),
-            "2" => Some(Self::ServiceRemoved),
-            _ => None,
-        }
+impl FromStr for GTFSExceptionType {
+    type Err = String;
+
+    /// Parse the CSV value. Returns `None` for any unrecognised value.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.trim() {
+            "1" => Self::ServiceAdded,
+            "2" => Self::ServiceRemoved,
+            _ => return Err(format!("Cannot parse {:?} into GTFSExceptionType", s)),
+        })
     }
 }
 
-/// A single raw row from `calendar_dates.txt`.
+/// A single row from `calendar_dates.txt`.
 #[derive(Debug, Clone, PartialEq)]
-pub struct GTFSRawCalendarDate {
+pub struct GTFSCalendarDate {
     service_id: GTFSServiceId,
     date: String,
     exception_type: GTFSExceptionType,
 }
 
-impl GTFSRawCalendarDate {
+impl GTFSCalendarDate {
     pub fn new(service_id: GTFSServiceId, date: String, exception_type: GTFSExceptionType) -> Self {
         Self {
             service_id,

@@ -1,5 +1,7 @@
+use std::str::FromStr;
+
 use crate::infra::importers::gtfs::{
-    GTFSLocationType, GTFSRawStop, GTFSStopId, parser::GTFSParseError,
+    GTFSLocationType, GTFSStop, GTFSStopId, parsers::GTFSParseError,
 };
 
 struct StopsHeader {
@@ -55,7 +57,7 @@ impl StopsParser {
         })
     }
 
-    pub fn parse(&self) -> Result<Vec<GTFSRawStop>, GTFSParseError> {
+    pub fn parse(&self) -> Result<Vec<GTFSStop>, GTFSParseError> {
         let header = self.header()?;
         let mut rows = self.content.split('\n');
         let _ = rows.next();
@@ -69,7 +71,7 @@ impl StopsParser {
                 cols.get(header.lat).and_then(|v| v.parse::<f64>().ok()),
                 cols.get(header.lon).and_then(|v| v.parse::<f64>().ok()),
                 cols.get(header.location_type)
-                    .and_then(|v| GTFSLocationType::from_str(v)),
+                    .and_then(|v| GTFSLocationType::from_str(v).ok()),
                 cols.get(header.parent_station),
             ) else {
                 continue;
@@ -81,7 +83,7 @@ impl StopsParser {
                 Some(GTFSStopId::from(parent.to_string()))
             };
 
-            stops.push(GTFSRawStop::new(
+            stops.push(GTFSStop::new(
                 GTFSStopId::from(id.to_string()),
                 name.to_string(),
                 lat,
@@ -105,15 +107,15 @@ mod tests {
         GTFSStopId::from(id.to_string())
     }
 
-    fn raw_stop(
+    fn stop(
         id: &str,
         name: &str,
         lat: f64,
         lon: f64,
         location_type: GTFSLocationType,
         parent: Option<&str>,
-    ) -> GTFSRawStop {
-        GTFSRawStop::new(
+    ) -> GTFSStop {
+        GTFSStop::new(
             stop_id(id),
             name.to_string(),
             lat,
@@ -125,7 +127,7 @@ mod tests {
 
     // ── error paths ────────────────────────────────────────────────────────
 
-    fn missing_col(result: Result<Vec<GTFSRawStop>, GTFSParseError>) -> String {
+    fn missing_col(result: Result<Vec<GTFSStop>, GTFSParseError>) -> String {
         match result.unwrap_err() {
             GTFSParseError::MissingColumn(col) => col,
             other => panic!("expected MissingColumn, got {other:?}"),
@@ -218,7 +220,7 @@ mod tests {
         let result = StopsParser::from(content.to_string()).parse().unwrap();
         assert_eq!(
             result,
-            vec![raw_stop(
+            vec![stop(
                 "StopArea:S1",
                 "Paris Nord",
                 48.8448,
@@ -236,7 +238,7 @@ mod tests {
         let result = StopsParser::from(content.to_string()).parse().unwrap();
         assert_eq!(
             result,
-            vec![raw_stop(
+            vec![stop(
                 "StopPoint:P1",
                 "Paris Nord TGV",
                 48.8448,

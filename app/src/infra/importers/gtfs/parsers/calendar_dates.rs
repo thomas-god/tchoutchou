@@ -1,4 +1,8 @@
-use crate::infra::importers::gtfs::{GTFSExceptionType, GTFSRawCalendarDate, GTFSServiceId, parser::GTFSParseError};
+use std::str::FromStr;
+
+use crate::infra::importers::gtfs::{
+    GTFSCalendarDate, GTFSExceptionType, GTFSServiceId, parsers::GTFSParseError,
+};
 
 struct CalendarDatesHeader {
     service_id: usize,
@@ -41,7 +45,7 @@ impl CalendarDatesParser {
         })
     }
 
-    pub fn parse(&self) -> Result<Vec<GTFSRawCalendarDate>, GTFSParseError> {
+    pub fn parse(&self) -> Result<Vec<GTFSCalendarDate>, GTFSParseError> {
         let header = self.header()?;
         let mut rows = self.content.split('\n');
         let _ = rows.next();
@@ -53,12 +57,13 @@ impl CalendarDatesParser {
                 cols.get(header.service_id)
                     .map(|v| GTFSServiceId::from(v.to_string())),
                 cols.get(header.date).map(|v| v.to_string()),
-                cols.get(header.exception_type).and_then(|v| GTFSExceptionType::from_str(v)),
+                cols.get(header.exception_type)
+                    .and_then(|v| GTFSExceptionType::from_str(v).ok()),
             ) else {
                 continue;
             };
 
-            dates.push(GTFSRawCalendarDate::new(service_id, date, exception_type));
+            dates.push(GTFSCalendarDate::new(service_id, date, exception_type));
         }
 
         Ok(dates)
@@ -75,13 +80,13 @@ mod tests {
         GTFSServiceId::from(id.to_string())
     }
 
-    fn raw_date(service_id: &str, date: &str, exception_type: GTFSExceptionType) -> GTFSRawCalendarDate {
-        GTFSRawCalendarDate::new(svc(service_id), date.to_string(), exception_type)
+    fn date(service_id: &str, date: &str, exception_type: GTFSExceptionType) -> GTFSCalendarDate {
+        GTFSCalendarDate::new(svc(service_id), date.to_string(), exception_type)
     }
 
     // ── error paths ────────────────────────────────────────────────────────
 
-    fn missing_col(result: Result<Vec<GTFSRawCalendarDate>, GTFSParseError>) -> String {
+    fn missing_col(result: Result<Vec<GTFSCalendarDate>, GTFSParseError>) -> String {
         match result.unwrap_err() {
             GTFSParseError::MissingColumn(col) => col,
             other => panic!("expected MissingColumn, got {other:?}"),
@@ -105,8 +110,7 @@ mod tests {
 
     #[test]
     fn missing_exception_type_column() {
-        let col =
-            missing_col(CalendarDatesParser::from("service_id,date\n".to_string()).parse());
+        let col = missing_col(CalendarDatesParser::from("service_id,date\n".to_string()).parse());
         assert_eq!(col, "exception_type");
     }
 
@@ -115,32 +119,45 @@ mod tests {
     #[test]
     fn header_only_yields_empty_vec() {
         let content = "service_id,date,exception_type\n";
-        let result = CalendarDatesParser::from(content.to_string()).parse().unwrap();
+        let result = CalendarDatesParser::from(content.to_string())
+            .parse()
+            .unwrap();
         assert_eq!(result, vec![]);
     }
 
     #[test]
     fn single_row_parsed_correctly() {
         let content = "service_id,date,exception_type\nSVC1,20260501,1";
-        let result = CalendarDatesParser::from(content.to_string()).parse().unwrap();
-        assert_eq!(result, vec![raw_date("SVC1", "20260501", GTFSExceptionType::ServiceAdded)]);
+        let result = CalendarDatesParser::from(content.to_string())
+            .parse()
+            .unwrap();
+        assert_eq!(
+            result,
+            vec![date("SVC1", "20260501", GTFSExceptionType::ServiceAdded)]
+        );
     }
 
     #[test]
     fn multiple_rows_for_same_service() {
         let content =
             "service_id,date,exception_type\nSVC1,20260501,1\nSVC1,20260508,1\nSVC1,20260515,2";
-        let result = CalendarDatesParser::from(content.to_string()).parse().unwrap();
+        let result = CalendarDatesParser::from(content.to_string())
+            .parse()
+            .unwrap();
         assert_eq!(result.len(), 3);
         // All rows are kept, including ServiceRemoved; filtering is the importer's job.
-        assert_eq!(result[2].exception_type(), GTFSExceptionType::ServiceRemoved);
+        assert_eq!(
+            result[2].exception_type(),
+            GTFSExceptionType::ServiceRemoved
+        );
     }
 
     #[test]
     fn rows_from_multiple_services_are_all_emitted() {
-        let content =
-            "service_id,date,exception_type\nSVC1,20260501,1\nSVC2,20260502,1";
-        let result = CalendarDatesParser::from(content.to_string()).parse().unwrap();
+        let content = "service_id,date,exception_type\nSVC1,20260501,1\nSVC2,20260502,1";
+        let result = CalendarDatesParser::from(content.to_string())
+            .parse()
+            .unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].service_id(), &svc("SVC1"));
         assert_eq!(result[1].service_id(), &svc("SVC2"));
@@ -148,8 +165,11 @@ mod tests {
 
     #[test]
     fn row_with_unrecognised_exception_type_is_skipped() {
-        let content = "service_id,date,exception_type\nSVC1,20260501,BAD\nSVC1,20260501,99\nSVC1,20260508,1";
-        let result = CalendarDatesParser::from(content.to_string()).parse().unwrap();
+        let content =
+            "service_id,date,exception_type\nSVC1,20260501,BAD\nSVC1,20260501,99\nSVC1,20260508,1";
+        let result = CalendarDatesParser::from(content.to_string())
+            .parse()
+            .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].date(), "20260508");
     }
@@ -157,15 +177,22 @@ mod tests {
     #[test]
     fn both_exception_types_are_parsed() {
         let content = "service_id,date,exception_type\nSVC1,20260501,1\nSVC1,20260508,2";
-        let result = CalendarDatesParser::from(content.to_string()).parse().unwrap();
+        let result = CalendarDatesParser::from(content.to_string())
+            .parse()
+            .unwrap();
         assert_eq!(result[0].exception_type(), GTFSExceptionType::ServiceAdded);
-        assert_eq!(result[1].exception_type(), GTFSExceptionType::ServiceRemoved);
+        assert_eq!(
+            result[1].exception_type(),
+            GTFSExceptionType::ServiceRemoved
+        );
     }
 
     #[test]
     fn truncated_row_is_skipped() {
         let content = "service_id,date,exception_type\nSVC1\nSVC2,20260501,1";
-        let result = CalendarDatesParser::from(content.to_string()).parse().unwrap();
+        let result = CalendarDatesParser::from(content.to_string())
+            .parse()
+            .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].service_id(), &svc("SVC2"));
     }

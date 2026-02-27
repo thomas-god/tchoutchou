@@ -1,15 +1,82 @@
 use std::collections::HashMap;
 
+use derive_more::{Constructor, From};
+
 use crate::app::schedule::{
     ImportTrainData, ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation,
     ImportedStationId, ImportedTrip,
 };
 
 use super::{
-    GTFSExceptionType, GTFSLocationType, GTFSRawCalendarDate, GTFSRawStop, GTFSRawStopTime,
-    GTFSRawTrip, GTFSRouteId, GTFSServiceId, GTFSStation, GTFSStationId, GTFSStopId, GTFSTripId,
-    GTFSTripLeg, ParseGTFS,
+    GTFSCalendarDate, GTFSExceptionType, GTFSLocationType, GTFSRouteId, GTFSServiceId, GTFSStop,
+    GTFSStopId, GTFSStopTime, GTFSTrip, GTFSTripId, ParseGTFS,
 };
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
+struct GTFSStationId(String);
+
+impl GTFSStationId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A station can contain several, possibly abstract, stops. For example `GTFSStationId` "Paris Gare
+/// de Lyon" can contain `GTFSStopId`s "Paris Gare de Lyon - TGV" and "Paris Gare de Lyon - OUIGO"
+/// amongst others.
+#[derive(Debug, Clone, PartialEq, Constructor)]
+struct GTFSStation {
+    id: GTFSStationId,
+    name: String,
+    lat: f64,
+    lon: f64,
+    stops: Vec<GTFSStopId>,
+}
+
+impl GTFSStation {
+    fn id(&self) -> &GTFSStationId {
+        &self.id
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn lat(&self) -> f64 {
+        self.lat
+    }
+    fn lon(&self) -> f64 {
+        self.lon
+    }
+    fn stops(&self) -> &[GTFSStopId] {
+        &self.stops
+    }
+}
+
+#[derive(Debug, Clone, Constructor, PartialEq, PartialOrd, Eq, Ord)]
+struct GTFSTripLeg {
+    route: GTFSRouteId,
+    origin: GTFSStopId,
+    destination: GTFSStopId,
+    departure: usize,
+    arrival: usize,
+}
+
+impl GTFSTripLeg {
+    fn route(&self) -> &GTFSRouteId {
+        &self.route
+    }
+    fn origin(&self) -> &GTFSStopId {
+        &self.origin
+    }
+    fn destination(&self) -> &GTFSStopId {
+        &self.destination
+    }
+    fn departure(&self) -> usize {
+        self.departure
+    }
+    fn arrival(&self) -> usize {
+        self.arrival
+    }
+}
 
 pub struct GTFSImporter {
     stations: Vec<ImportedStation>,
@@ -60,8 +127,8 @@ impl ImportTrainData for GTFSImporter {
 /// Rows where `location_type == Station` become the station entries (holding
 /// name and coordinates). Rows where `location_type == Stop` are attached to
 /// their `parent_station`.
-fn build_stations(stops: &[GTFSRawStop]) -> Vec<GTFSStation> {
-    // Map: parent station raw id → child stop ids.
+fn build_stations(stops: &[GTFSStop]) -> Vec<GTFSStation> {
+    // Map: parent station id → child stop ids.
     let mut children: HashMap<&str, Vec<GTFSStopId>> = HashMap::new();
     for stop in stops
         .iter()
@@ -96,15 +163,13 @@ fn build_stations(stops: &[GTFSRawStop]) -> Vec<GTFSStation> {
 /// For each GTFS trip the stop times are sorted by `stop_sequence` and then
 /// every ordered pair `(i, j)` with `i < j` is emitted as a leg — so a
 /// three-stop trip A → B → C produces legs A→B, A→C, and B→C.
-fn build_trip_legs(stop_times: &[GTFSRawStopTime], trips_raw: &[GTFSRawTrip]) -> Vec<GTFSTripLeg> {
-    // trip_id → route_id (borrows from trips_raw)
-    let route_by_trip: HashMap<&GTFSTripId, &GTFSRouteId> = trips_raw
-        .iter()
-        .map(|t| (t.trip_id(), t.route_id()))
-        .collect();
+fn build_trip_legs(stop_times: &[GTFSStopTime], trips: &[GTFSTrip]) -> Vec<GTFSTripLeg> {
+    // trip_id → route_id (borrows from trips)
+    let route_by_trip: HashMap<&GTFSTripId, &GTFSRouteId> =
+        trips.iter().map(|t| (t.trip_id(), t.route_id())).collect();
 
     // Group stop times by trip, then sort each group by sequence.
-    let mut by_trip: HashMap<&GTFSTripId, Vec<&GTFSRawStopTime>> = HashMap::new();
+    let mut by_trip: HashMap<&GTFSTripId, Vec<&GTFSStopTime>> = HashMap::new();
     for st in stop_times {
         by_trip.entry(st.trip_id()).or_default().push(st);
     }
@@ -132,12 +197,12 @@ fn build_trip_legs(stop_times: &[GTFSRawStopTime], trips_raw: &[GTFSRawTrip]) ->
     legs
 }
 
-/// Builds `ImportedSchedule` values from raw calendar-date rows.
+/// Builds `ImportedSchedule` values from calendar-date rows.
 ///
 /// Only `ServiceAdded` rows contribute dates; `ServiceRemoved` rows are
 /// intentionally ignored — they express exceptions to a base calendar that
 /// this feed does not include.
-fn build_imported_schedules(calendar_dates: &[GTFSRawCalendarDate]) -> Vec<ImportedSchedule> {
+fn build_imported_schedules(calendar_dates: &[GTFSCalendarDate]) -> Vec<ImportedSchedule> {
     let mut by_service: HashMap<GTFSServiceId, Vec<String>> = HashMap::new();
     for date in calendar_dates
         .iter()
@@ -156,12 +221,12 @@ fn build_imported_schedules(calendar_dates: &[GTFSRawCalendarDate]) -> Vec<Impor
         .collect()
 }
 
-/// Builds the route → schedule-ids index from raw trip rows.
+/// Builds the route → schedule-ids index from trip rows.
 fn build_imported_schedules_by_route(
-    trips_raw: &[GTFSRawTrip],
+    trips: &[GTFSTrip],
 ) -> HashMap<ImportedRouteId, Vec<ImportedScheduleId>> {
     let mut by_route: HashMap<ImportedRouteId, Vec<ImportedScheduleId>> = HashMap::new();
-    for trip in trips_raw {
+    for trip in trips {
         by_route
             .entry(ImportedRouteId::from(trip.route_id().as_str().to_owned()))
             .or_default()
@@ -223,8 +288,8 @@ mod tests {
     }
 
     /// A station row (location_type = 1, no parent).
-    fn raw_station(id: &str, name: &str) -> GTFSRawStop {
-        GTFSRawStop::new(
+    fn station(id: &str, name: &str) -> GTFSStop {
+        GTFSStop::new(
             sid(id),
             name.to_owned(),
             0.0,
@@ -235,8 +300,8 @@ mod tests {
     }
 
     /// A platform/stop row (location_type = 0, with parent).
-    fn raw_stop(id: &str, parent: &str) -> GTFSRawStop {
-        GTFSRawStop::new(
+    fn stop(id: &str, parent: &str) -> GTFSStop {
+        GTFSStop::new(
             sid(id),
             id.to_owned(),
             0.0,
@@ -246,22 +311,22 @@ mod tests {
         )
     }
 
-    fn raw_trip(trip_id: &str, route_id: &str, service_id: &str) -> GTFSRawTrip {
-        GTFSRawTrip::new(
+    fn trip(trip_id: &str, route_id: &str, service_id: &str) -> GTFSTrip {
+        GTFSTrip::new(
             GTFSTripId::from(trip_id.to_owned()),
             GTFSRouteId::from(route_id.to_owned()),
             GTFSServiceId::from(service_id.to_owned()),
         )
     }
 
-    fn raw_stop_time(
+    fn stop_time(
         trip_id: &str,
         stop_id: &str,
         arrival: usize,
         departure: usize,
         seq: usize,
-    ) -> GTFSRawStopTime {
-        GTFSRawStopTime::new(
+    ) -> GTFSStopTime {
+        GTFSStopTime::new(
             GTFSTripId::from(trip_id.to_owned()),
             arrival,
             departure,
@@ -271,23 +336,23 @@ mod tests {
     }
 
     struct StubParser {
-        stops: Vec<GTFSRawStop>,
-        stop_times: Vec<GTFSRawStopTime>,
-        trips: Vec<GTFSRawTrip>,
-        calendar_dates: Vec<GTFSRawCalendarDate>,
+        stops: Vec<GTFSStop>,
+        stop_times: Vec<GTFSStopTime>,
+        trips: Vec<GTFSTrip>,
+        calendar_dates: Vec<GTFSCalendarDate>,
     }
 
     impl ParseGTFS for StubParser {
-        fn stops(&self) -> &[GTFSRawStop] {
+        fn stops(&self) -> &[GTFSStop] {
             &self.stops
         }
-        fn stop_times(&self) -> &[GTFSRawStopTime] {
+        fn stop_times(&self) -> &[GTFSStopTime] {
             &self.stop_times
         }
-        fn trips(&self) -> &[GTFSRawTrip] {
+        fn trips(&self) -> &[GTFSTrip] {
             &self.trips
         }
-        fn calendar_dates(&self) -> &[GTFSRawCalendarDate] {
+        fn calendar_dates(&self) -> &[GTFSCalendarDate] {
             &self.calendar_dates
         }
     }
@@ -298,11 +363,11 @@ mod tests {
     fn stations_are_converted_from_gtfs() {
         let parser = StubParser {
             stops: vec![
-                raw_station("S1", "Paris Nord"),
-                raw_stop("S1-A", "S1"),
-                raw_stop("S1-B", "S1"),
-                raw_station("S2", "Lyon Perrache"),
-                raw_stop("S2-A", "S2"),
+                station("S1", "Paris Nord"),
+                stop("S1-A", "S1"),
+                stop("S1-B", "S1"),
+                station("S2", "Lyon Perrache"),
+                stop("S2-A", "S2"),
             ],
             stop_times: vec![],
             trips: vec![],
@@ -337,8 +402,8 @@ mod tests {
     fn stop_rows_without_parent_are_not_exposed_as_stations() {
         let parser = StubParser {
             stops: vec![
-                raw_station("S1", "Paris Nord"),
-                GTFSRawStop::new(
+                station("S1", "Paris Nord"),
+                GTFSStop::new(
                     sid("orphan"),
                     "Orphan".to_owned(),
                     0.0,
@@ -363,17 +428,17 @@ mod tests {
     fn trips_resolve_stops_to_their_parent_station() {
         let parser = StubParser {
             stops: vec![
-                raw_station("S1", "Paris Nord"),
-                raw_stop("S1-A", "S1"),
-                raw_stop("S1-B", "S1"),
-                raw_station("S2", "Lyon Perrache"),
-                raw_stop("S2-A", "S2"),
+                station("S1", "Paris Nord"),
+                stop("S1-A", "S1"),
+                stop("S1-B", "S1"),
+                station("S2", "Lyon Perrache"),
+                stop("S2-A", "S2"),
             ],
             stop_times: vec![
-                raw_stop_time("T1", "S1-B", 0, 800, 0),
-                raw_stop_time("T1", "S2-A", 1200, 0, 1),
+                stop_time("T1", "S1-B", 0, 800, 0),
+                stop_time("T1", "S2-A", 1200, 0, 1),
             ],
-            trips: vec![raw_trip("T1", "R1", "SVC1")],
+            trips: vec![trip("T1", "R1", "SVC1")],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser);
@@ -395,12 +460,12 @@ mod tests {
     #[test]
     fn trips_with_unknown_stops_are_dropped() {
         let parser = StubParser {
-            stops: vec![raw_station("S1", "Paris Nord"), raw_stop("S1-A", "S1")],
+            stops: vec![station("S1", "Paris Nord"), stop("S1-A", "S1")],
             stop_times: vec![
-                raw_stop_time("T1", "S1-A", 0, 800, 0),
-                raw_stop_time("T1", "S2-X", 1200, 0, 1),
+                stop_time("T1", "S1-A", 0, 800, 0),
+                stop_time("T1", "S2-X", 1200, 0, 1),
             ],
-            trips: vec![raw_trip("T1", "R1", "SVC1")],
+            trips: vec![trip("T1", "R1", "SVC1")],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser);
@@ -411,20 +476,20 @@ mod tests {
     fn multiple_stops_from_same_station_map_to_same_station_id() {
         let parser = StubParser {
             stops: vec![
-                raw_station("S1", "Paris Nord"),
-                raw_stop("S1-A", "S1"),
-                raw_stop("S1-B", "S1"),
-                raw_station("S2", "Lyon Perrache"),
-                raw_stop("S2-A", "S2"),
-                raw_stop("S2-B", "S2"),
+                station("S1", "Paris Nord"),
+                stop("S1-A", "S1"),
+                stop("S1-B", "S1"),
+                station("S2", "Lyon Perrache"),
+                stop("S2-A", "S2"),
+                stop("S2-B", "S2"),
             ],
             stop_times: vec![
-                raw_stop_time("T1", "S1-A", 0, 800, 0),
-                raw_stop_time("T1", "S2-A", 1200, 0, 1),
-                raw_stop_time("T2", "S1-B", 0, 900, 0),
-                raw_stop_time("T2", "S2-B", 1300, 0, 1),
+                stop_time("T1", "S1-A", 0, 800, 0),
+                stop_time("T1", "S2-A", 1200, 0, 1),
+                stop_time("T2", "S1-B", 0, 900, 0),
+                stop_time("T2", "S2-B", 1300, 0, 1),
             ],
-            trips: vec![raw_trip("T1", "R1", "SVC1"), raw_trip("T2", "R1", "SVC2")],
+            trips: vec![trip("T1", "R1", "SVC1"), trip("T2", "R1", "SVC2")],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser);
@@ -443,19 +508,19 @@ mod tests {
     fn three_stop_trip_expands_into_all_pairs() {
         let parser = StubParser {
             stops: vec![
-                raw_station("SA", "Station A"),
-                raw_stop("A", "SA"),
-                raw_station("SB", "Station B"),
-                raw_stop("B", "SB"),
-                raw_station("SC", "Station C"),
-                raw_stop("C", "SC"),
+                station("SA", "Station A"),
+                stop("A", "SA"),
+                station("SB", "Station B"),
+                stop("B", "SB"),
+                station("SC", "Station C"),
+                stop("C", "SC"),
             ],
             stop_times: vec![
-                raw_stop_time("T1", "A", 0, 600, 0),
-                raw_stop_time("T1", "B", 1200, 1200, 1),
-                raw_stop_time("T1", "C", 1800, 0, 2),
+                stop_time("T1", "A", 0, 600, 0),
+                stop_time("T1", "B", 1200, 1200, 1),
+                stop_time("T1", "C", 1800, 0, 2),
             ],
-            trips: vec![raw_trip("T1", "R1", "SVC1")],
+            trips: vec![trip("T1", "R1", "SVC1")],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser);
@@ -478,17 +543,17 @@ mod tests {
             stop_times: vec![],
             trips: vec![],
             calendar_dates: vec![
-                GTFSRawCalendarDate::new(
+                GTFSCalendarDate::new(
                     GTFSServiceId::from("SVC1".to_owned()),
                     "20260501".to_owned(),
                     GTFSExceptionType::ServiceAdded,
                 ),
-                GTFSRawCalendarDate::new(
+                GTFSCalendarDate::new(
                     GTFSServiceId::from("SVC1".to_owned()),
                     "20260508".to_owned(),
                     GTFSExceptionType::ServiceAdded,
                 ),
-                GTFSRawCalendarDate::new(
+                GTFSCalendarDate::new(
                     GTFSServiceId::from("SVC1".to_owned()),
                     "20260515".to_owned(),
                     GTFSExceptionType::ServiceRemoved,
@@ -514,9 +579,9 @@ mod tests {
             stops: vec![],
             stop_times: vec![],
             trips: vec![
-                raw_trip("T1", "R1", "SVC1"),
-                raw_trip("T2", "R1", "SVC2"),
-                raw_trip("T3", "R2", "SVC3"),
+                trip("T1", "R1", "SVC1"),
+                trip("T2", "R1", "SVC2"),
+                trip("T3", "R2", "SVC3"),
             ],
             calendar_dates: vec![],
         };

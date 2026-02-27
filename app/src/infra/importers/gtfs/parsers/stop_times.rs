@@ -1,4 +1,6 @@
-use crate::infra::importers::gtfs::{GTFSRawStopTime, GTFSStopId, GTFSTripId, parser::GTFSParseError};
+use crate::infra::importers::gtfs::{
+    GTFSStopId, GTFSStopTime, GTFSTripId, parsers::GTFSParseError,
+};
 
 struct StopTimesHeader {
     trip_id: usize,
@@ -39,20 +41,18 @@ impl StopTimesParser {
         }
 
         Ok(StopTimesHeader {
-            trip_id: trip_id
-                .ok_or_else(|| GTFSParseError::MissingColumn("trip_id".to_string()))?,
+            trip_id: trip_id.ok_or_else(|| GTFSParseError::MissingColumn("trip_id".to_string()))?,
             arrival_time: arrival_time
                 .ok_or_else(|| GTFSParseError::MissingColumn("arrival_time".to_string()))?,
             departure_time: departure_time
                 .ok_or_else(|| GTFSParseError::MissingColumn("departure_time".to_string()))?,
-            stop_id: stop_id
-                .ok_or_else(|| GTFSParseError::MissingColumn("stop_id".to_string()))?,
+            stop_id: stop_id.ok_or_else(|| GTFSParseError::MissingColumn("stop_id".to_string()))?,
             stop_sequence: stop_sequence
                 .ok_or_else(|| GTFSParseError::MissingColumn("stop_sequence".to_string()))?,
         })
     }
 
-    pub fn parse(&self) -> Result<Vec<GTFSRawStopTime>, GTFSParseError> {
+    pub fn parse(&self) -> Result<Vec<GTFSStopTime>, GTFSParseError> {
         let header = self.header()?;
         let mut rows = self.content.split('\n');
         let _ = rows.next();
@@ -61,17 +61,21 @@ impl StopTimesParser {
         for row in rows {
             let cols: Vec<&str> = row.split(',').collect();
             let (Some(trip_id), Some(arrival), Some(departure), Some(stop_id), Some(sequence)) = (
-                cols.get(header.trip_id).map(|v| GTFSTripId::from(v.to_string())),
+                cols.get(header.trip_id)
+                    .map(|v| GTFSTripId::from(v.to_string())),
                 cols.get(header.arrival_time).map(|v| parse_time(v)),
                 cols.get(header.departure_time).map(|v| parse_time(v)),
-                cols.get(header.stop_id).map(|v| GTFSStopId::from(v.to_string())),
+                cols.get(header.stop_id)
+                    .map(|v| GTFSStopId::from(v.to_string())),
                 cols.get(header.stop_sequence)
                     .and_then(|v| v.parse::<usize>().ok()),
             ) else {
                 continue;
             };
 
-            stop_times.push(GTFSRawStopTime::new(trip_id, arrival, departure, stop_id, sequence));
+            stop_times.push(GTFSStopTime::new(
+                trip_id, arrival, departure, stop_id, sequence,
+            ));
         }
 
         Ok(stop_times)
@@ -111,7 +115,7 @@ mod tests {
 
     // ── error paths ────────────────────────────────────────────────────────
 
-    fn missing_col(result: Result<Vec<GTFSRawStopTime>, GTFSParseError>) -> String {
+    fn missing_col(result: Result<Vec<GTFSStopTime>, GTFSParseError>) -> String {
         match result.unwrap_err() {
             GTFSParseError::MissingColumn(col) => col,
             other => panic!("expected MissingColumn, got {other:?}"),
@@ -132,10 +136,8 @@ mod tests {
     #[test]
     fn missing_arrival_time_column() {
         let col = missing_col(
-            StopTimesParser::from(
-                "trip_id,departure_time,stop_id,stop_sequence\n".to_string(),
-            )
-            .parse(),
+            StopTimesParser::from("trip_id,departure_time,stop_id,stop_sequence\n".to_string())
+                .parse(),
         );
         assert_eq!(col, "arrival_time");
     }
@@ -143,10 +145,8 @@ mod tests {
     #[test]
     fn missing_departure_time_column() {
         let col = missing_col(
-            StopTimesParser::from(
-                "trip_id,arrival_time,stop_id,stop_sequence\n".to_string(),
-            )
-            .parse(),
+            StopTimesParser::from("trip_id,arrival_time,stop_id,stop_sequence\n".to_string())
+                .parse(),
         );
         assert_eq!(col, "departure_time");
     }
@@ -165,10 +165,8 @@ mod tests {
     #[test]
     fn missing_stop_sequence_column() {
         let col = missing_col(
-            StopTimesParser::from(
-                "trip_id,arrival_time,departure_time,stop_id\n".to_string(),
-            )
-            .parse(),
+            StopTimesParser::from("trip_id,arrival_time,departure_time,stop_id\n".to_string())
+                .parse(),
         );
         assert_eq!(col, "stop_sequence");
     }
@@ -189,7 +187,13 @@ mod tests {
         let result = StopTimesParser::from(content.to_string()).parse().unwrap();
         assert_eq!(
             result,
-            vec![GTFSRawStopTime::new(trip_id("TRIP1"), 36000, 36000, stop_id("STOP_A"), 0)]
+            vec![GTFSStopTime::new(
+                trip_id("TRIP1"),
+                36000,
+                36000,
+                stop_id("STOP_A"),
+                0
+            )]
         );
     }
 
@@ -248,8 +252,7 @@ mod tests {
 
     #[test]
     fn extra_columns_are_ignored() {
-        let content =
-            "trip_id,arrival_time,departure_time,stop_id,stop_sequence,stop_headsign,pickup_type\n\
+        let content = "trip_id,arrival_time,departure_time,stop_id,stop_sequence,stop_headsign,pickup_type\n\
              TRIP1,09:00:00,09:00:00,STOP_A,0,some_headsign,0";
         let result = StopTimesParser::from(content.to_string()).parse().unwrap();
         assert_eq!(result.len(), 1);
