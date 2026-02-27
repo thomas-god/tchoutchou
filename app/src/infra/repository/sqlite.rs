@@ -39,19 +39,22 @@ impl SqliteRepository {
         self.conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS stations (
-                id   TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                lat  REAL NOT NULL,
-                lon  REAL NOT NULL
+                source TEXT NOT NULL,
+                id     TEXT PRIMARY KEY,
+                name   TEXT NOT NULL,
+                lat    REAL NOT NULL,
+                lon    REAL NOT NULL
             );
 
             -- dates are stored as a comma-separated list of YYYYMMDD strings
             CREATE TABLE IF NOT EXISTS schedules (
-                id    TEXT PRIMARY KEY,
-                dates TEXT NOT NULL
+                source TEXT NOT NULL,
+                id     TEXT PRIMARY KEY,
+                dates  TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS trips (
+                source      TEXT    NOT NULL,
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 route       TEXT    NOT NULL,
                 origin      TEXT    NOT NULL,
@@ -61,9 +64,10 @@ impl SqliteRepository {
             );
 
             CREATE TABLE IF NOT EXISTS route_schedules (
+                source      TEXT NOT NULL,
                 route_id    TEXT NOT NULL,
                 schedule_id TEXT NOT NULL,
-                PRIMARY KEY (route_id, schedule_id)
+                PRIMARY KEY (source, route_id, schedule_id)
             );
             ",
         )
@@ -108,55 +112,64 @@ impl SqliteRepository {
     }
 
     /// Delete all rows from the three volatile tables in a single batch.
-    fn truncate_timetable(tx: &Transaction) {
-        tx.execute_batch(
-            "DELETE FROM route_schedules;
-             DELETE FROM schedules;
-             DELETE FROM trips;",
-        )
-        .expect("truncate_timetable: failed");
+    fn truncate_timetable(tx: &Transaction, source: &str) {
+        tx.prepare_cached("DELETE FROM route_schedules WHERE source = ?1;")
+            .expect("delete_from_route_schedules: prepare failed")
+            .execute(params![source])
+            .expect("delete_from_route_schedules: execute failed");
+
+        tx.prepare_cached("DELETE FROM schedules WHERE source = ?1;")
+            .expect("delete_schedules: prepare failed")
+            .execute(params![source])
+            .expect("delete_schedules: execute failed");
+
+        tx.prepare_cached("DELETE FROM trips WHERE source = ?1;")
+            .expect("delete_from_trips: prepare failed")
+            .execute(params![source])
+            .expect("delete_from_trips: execute failed");
     }
 
     /// Upsert stations; existing rows are overwritten, new ones inserted.
-    fn upsert_stations(tx: &Transaction, stations: &[ImportedStation]) {
+    fn upsert_stations(tx: &Transaction, stations: &[ImportedStation], source: &str) {
         let mut stmt = tx
             .prepare_cached(
-                "INSERT OR REPLACE INTO stations (id, name, lat, lon)
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT OR REPLACE INTO stations (id, name, source, lat, lon)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
             )
             .expect("upsert_stations: prepare failed");
         for s in stations {
-            stmt.execute(params![s.id().as_str(), s.name(), s.lat(), s.lon()])
+            stmt.execute(params![s.id().as_str(), s.name(), source, s.lat(), s.lon()])
                 .expect("upsert_stations: execute failed");
         }
     }
 
     /// Insert schedules (table was just truncated, so no conflict is expected).
-    fn insert_schedules(tx: &Transaction, schedules: &[ImportedSchedule]) {
+    fn insert_schedules(tx: &Transaction, schedules: &[ImportedSchedule], source: &str) {
         let mut stmt = tx
             .prepare_cached(
-                "INSERT INTO schedules (id, dates)
-                 VALUES (?1, ?2)",
+                "INSERT INTO schedules (id, source, dates)
+                 VALUES (?1, ?2, ?3)",
             )
             .expect("insert_schedules: prepare failed");
         for s in schedules {
             let dates = s.dates().join(",");
-            stmt.execute(params![s.id().as_str(), dates])
+            stmt.execute(params![s.id().as_str(), source, dates])
                 .expect("insert_schedules: execute failed");
         }
     }
 
     /// Insert trip legs (table was just truncated, so no conflict is expected).
-    fn insert_trips(tx: &Transaction, trips: &[ImportedTripLeg]) {
+    fn insert_trips(tx: &Transaction, trips: &[ImportedTripLeg], source: &str) {
         let mut stmt = tx
             .prepare_cached(
-                "INSERT INTO trips (route, origin, destination, departure, arrival)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO trips (route, source, origin, destination, departure, arrival)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )
             .expect("insert_trips: prepare failed");
         for t in trips {
             stmt.execute(params![
                 t.route().as_str(),
+                source,
                 t.origin().as_str(),
                 t.destination().as_str(),
                 t.departure() as i64,
@@ -170,16 +183,17 @@ impl SqliteRepository {
     fn insert_route_schedules(
         tx: &Transaction,
         mapping: &HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
+        source: &str,
     ) {
         let mut stmt = tx
             .prepare_cached(
-                "INSERT INTO route_schedules (route_id, schedule_id)
-                 VALUES (?1, ?2)",
+                "INSERT INTO route_schedules (source, route_id, schedule_id)
+                 VALUES (?1, ?2, ?3)",
             )
             .expect("insert_route_schedules: prepare failed");
         for (route, schedules) in mapping {
             for schedule in schedules {
-                stmt.execute(params![route.as_str(), schedule.as_str()])
+                stmt.execute(params![source, route.as_str(), schedule.as_str()])
                     .expect("insert_route_schedules: execute failed");
             }
         }
@@ -196,11 +210,11 @@ impl TrainDataRepository for SqliteRepository {
         let existing = Self::load_existing_stations(&tx);
         let station_changes = Self::diff_stations(&existing, data.stations());
 
-        Self::truncate_timetable(&tx);
-        Self::upsert_stations(&tx, data.stations());
-        Self::insert_schedules(&tx, data.schedules());
-        Self::insert_trips(&tx, data.trip_legs());
-        Self::insert_route_schedules(&tx, data.schedules_by_route());
+        Self::truncate_timetable(&tx, data.source());
+        Self::upsert_stations(&tx, data.stations(), data.source());
+        Self::insert_schedules(&tx, data.schedules(), data.source());
+        Self::insert_trips(&tx, data.trip_legs(), data.source());
+        Self::insert_route_schedules(&tx, data.schedules_by_route(), data.source());
 
         tx.commit().expect("import_timetable: commit failed");
         println!(
@@ -444,11 +458,7 @@ mod tests {
         let snap = snapshot(vec![], sched, vec![], "source");
         repo.import_timetable(&snap);
         let result = repo.schedules_by_route();
-        assert!(
-            result
-                .get(&ImportedRouteId::from("R1".to_owned()))
-                .is_some()
-        );
+        assert!(result.contains_key(&ImportedRouteId::from("R1".to_owned())));
     }
 
     // ---- successive import tests ----
