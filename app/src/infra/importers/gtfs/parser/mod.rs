@@ -4,15 +4,13 @@ use crate::infra::importers::gtfs::{
 
 use self::{
     calendar_dates::CalendarDatesParser, stop_times::StopTimesParser, stops::StopsParser,
-    trips_file::TripsFileParser,
+    trips::TripsFileParser,
 };
 
 pub mod calendar_dates;
-mod stations;
 pub mod stop_times;
 pub mod stops;
-mod trips;
-pub mod trips_file;
+pub mod trips;
 
 #[derive(Debug)]
 pub enum GTFSParseError {
