@@ -360,6 +360,7 @@ mod tests {
         schedules: Vec<ImportedSchedule>,
         trips: Vec<ImportedTripLeg>,
         schedules_by_route: std::collections::HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
+        source: String,
     }
 
     impl ImportTrainData for Snapshot {
@@ -377,12 +378,16 @@ mod tests {
         ) -> &std::collections::HashMap<ImportedRouteId, Vec<ImportedScheduleId>> {
             &self.schedules_by_route
         }
+        fn source(&self) -> &str {
+            &self.source
+        }
     }
 
     fn snapshot(
         stations: Vec<ImportedStation>,
         schedules: Vec<ImportedSchedule>,
         trips: Vec<ImportedTripLeg>,
+        source: &str,
     ) -> Snapshot {
         let mut sbr = std::collections::HashMap::new();
         for s in &schedules {
@@ -395,6 +400,7 @@ mod tests {
             schedules,
             trips,
             schedules_by_route: sbr,
+            source: source.to_owned(),
         }
     }
 
@@ -404,7 +410,7 @@ mod tests {
     fn round_trip_stations() {
         let mut repo = make_repo();
         let input = vec![station("A"), station("B")];
-        repo.import_timetable(&snapshot(input.clone(), vec![], vec![]));
+        repo.import_timetable(&snapshot(input.clone(), vec![], vec![], "source"));
         let mut result = repo.all_stations();
         result.sort_by_key(|s| s.id().as_str().to_owned());
         assert_eq!(result, input);
@@ -414,7 +420,7 @@ mod tests {
     fn round_trip_schedules() {
         let mut repo = make_repo();
         let sched = vec![schedule("S1", &["20260101", "20260102"])];
-        repo.import_timetable(&snapshot(vec![], sched.clone(), vec![]));
+        repo.import_timetable(&snapshot(vec![], sched.clone(), vec![], "source"));
         assert_eq!(repo.all_schedules(), sched);
     }
 
@@ -426,6 +432,7 @@ mod tests {
             vec![station("A"), station("B")],
             vec![],
             trips.clone(),
+            "source",
         ));
         assert_eq!(repo.all_trips(), trips);
     }
@@ -434,7 +441,7 @@ mod tests {
     fn round_trip_schedules_by_route() {
         let mut repo = make_repo();
         let sched = vec![schedule("S1", &["20260101"])];
-        let snap = snapshot(vec![], sched, vec![]);
+        let snap = snapshot(vec![], sched, vec![], "source");
         repo.import_timetable(&snap);
         let result = repo.schedules_by_route();
         assert!(
@@ -454,6 +461,7 @@ mod tests {
             vec![station("A"), station("B")],
             vec![schedule("S1", &["20260101"])],
             vec![trip("R1", "A", "B", 100, 200)],
+            "source",
         );
         repo.import_timetable(&first);
 
@@ -461,6 +469,7 @@ mod tests {
             vec![station("A"), station("C")],
             vec![schedule("S2", &["20260201"])],
             vec![trip("R2", "A", "C", 300, 400)],
+            "source",
         );
         repo.import_timetable(&second);
 
@@ -487,7 +496,7 @@ mod tests {
     #[test]
     fn import_reports_new_stations() {
         let mut repo = make_repo();
-        let snap = snapshot(vec![station("A"), station("B")], vec![], vec![]);
+        let snap = snapshot(vec![station("A"), station("B")], vec![], vec![], "source");
         let result = repo.import_timetable(&snap);
         let added: Vec<_> = result
             .station_changes
@@ -504,10 +513,15 @@ mod tests {
     #[test]
     fn import_reports_updated_stations() {
         let mut repo = make_repo();
-        repo.import_timetable(&snapshot(vec![station("A")], vec![], vec![]));
+        repo.import_timetable(&snapshot(vec![station("A")], vec![], vec![], "source"));
 
         // Second import with updated coordinates
-        let result = repo.import_timetable(&snapshot(vec![station_moved("A")], vec![], vec![]));
+        let result = repo.import_timetable(&snapshot(
+            vec![station_moved("A")],
+            vec![],
+            vec![],
+            "source",
+        ));
         let updated: Vec<_> = result
             .station_changes
             .iter()
@@ -522,7 +536,7 @@ mod tests {
     #[test]
     fn unchanged_stations_produce_no_diff() {
         let mut repo = make_repo();
-        let snap = snapshot(vec![station("A")], vec![], vec![]);
+        let snap = snapshot(vec![station("A")], vec![], vec![], "source");
         repo.import_timetable(&snap);
         let result = repo.import_timetable(&snap);
         assert!(result.station_changes.is_empty());
@@ -533,7 +547,7 @@ mod tests {
     #[test]
     fn station_name_change_is_reported_as_updated() {
         let mut repo = make_repo();
-        repo.import_timetable(&snapshot(vec![station("A")], vec![], vec![]));
+        repo.import_timetable(&snapshot(vec![station("A")], vec![], vec![], "source"));
 
         let renamed = ImportedStation::new(
             ImportedStationId::from("A".to_owned()),
@@ -541,7 +555,7 @@ mod tests {
             1.0,
             2.0,
         );
-        let result = repo.import_timetable(&snapshot(vec![renamed], vec![], vec![]));
+        let result = repo.import_timetable(&snapshot(vec![renamed], vec![], vec![], "source"));
         let updated: Vec<_> = result
             .station_changes
             .iter()
@@ -556,10 +570,15 @@ mod tests {
     #[test]
     fn station_absent_from_re_import_is_silently_retained() {
         let mut repo = make_repo();
-        repo.import_timetable(&snapshot(vec![station("A"), station("B")], vec![], vec![]));
+        repo.import_timetable(&snapshot(
+            vec![station("A"), station("B")],
+            vec![],
+            vec![],
+            "source",
+        ));
 
         // Second import only mentions A — B should still be in the DB.
-        repo.import_timetable(&snapshot(vec![station("A")], vec![], vec![]));
+        repo.import_timetable(&snapshot(vec![station("A")], vec![], vec![], "source"));
         let ids: Vec<_> = repo
             .all_stations()
             .into_iter()
@@ -577,10 +596,11 @@ mod tests {
             vec![station("A"), station("B")],
             vec![schedule("S1", &["20260101"])],
             vec![trip("R1", "A", "B", 100, 200)],
+            "source",
         ));
 
         // Second import is empty for timetable data.
-        repo.import_timetable(&snapshot(vec![], vec![], vec![]));
+        repo.import_timetable(&snapshot(vec![], vec![], vec![], "source"));
 
         assert!(repo.all_trips().is_empty(), "trips should be empty");
         assert!(repo.all_schedules().is_empty(), "schedules should be empty");
@@ -595,7 +615,7 @@ mod tests {
     #[test]
     fn fully_empty_import_does_not_panic_and_returns_no_changes() {
         let mut repo = make_repo();
-        let result = repo.import_timetable(&snapshot(vec![], vec![], vec![]));
+        let result = repo.import_timetable(&snapshot(vec![], vec![], vec![], "source"));
         assert!(result.station_changes.is_empty());
         assert!(repo.all_stations().is_empty());
         assert!(repo.all_trips().is_empty());
@@ -608,7 +628,12 @@ mod tests {
     fn schedule_with_no_dates_round_trips_correctly() {
         let mut repo = make_repo();
         let empty_sched = ImportedSchedule::new(ImportedScheduleId::from("S0".to_owned()), vec![]);
-        repo.import_timetable(&snapshot(vec![], vec![empty_sched.clone()], vec![]));
+        repo.import_timetable(&snapshot(
+            vec![],
+            vec![empty_sched.clone()],
+            vec![],
+            "source",
+        ));
         let result = repo.all_schedules();
         assert_eq!(result, vec![empty_sched]);
     }
@@ -633,6 +658,7 @@ mod tests {
             schedules: vec![s1, s2],
             trips: vec![],
             schedules_by_route: sbr,
+            source: "source".to_owned(),
         };
         repo.import_timetable(&snap);
         let result = repo.schedules_by_route();
@@ -660,6 +686,7 @@ mod tests {
             vec![station("A"), station("B"), station("C")],
             vec![],
             trips.clone(),
+            "source",
         ));
         let mut result = repo.all_trips();
         result.sort();

@@ -109,6 +109,7 @@ pub trait ImportTrainData {
     fn trip_legs(&self) -> &[ImportedTripLeg];
     fn schedules(&self) -> &[ImportedSchedule];
     fn schedules_by_route(&self) -> &HashMap<ImportedRouteId, Vec<ImportedScheduleId>>;
+    fn source(&self) -> &str;
 }
 
 /// Describes a change to a station detected during a timetable import.
@@ -284,6 +285,7 @@ mod tests {
         trips: Vec<ImportedTripLeg>,
         schedules: Vec<ImportedSchedule>,
         schedules_by_route: HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
+        source: String,
     }
 
     impl ImportTrainData for TestImporter {
@@ -302,6 +304,10 @@ mod tests {
         fn schedules_by_route(&self) -> &HashMap<ImportedRouteId, Vec<ImportedScheduleId>> {
             &self.schedules_by_route
         }
+
+        fn source(&self) -> &str {
+            &self.source
+        }
     }
 
     #[test]
@@ -319,7 +325,13 @@ mod tests {
             200,
         )];
         let schedules_by_route = HashMap::new();
-        let importer = TestImporter::new(stations, trips, schedules, schedules_by_route);
+        let importer = TestImporter::new(
+            stations,
+            trips,
+            schedules,
+            schedules_by_route,
+            "source".to_string(),
+        );
 
         let mut service = ScheduleService::new(InMemoryTestRepository::empty());
         service.ingest(&importer);
@@ -351,7 +363,13 @@ mod tests {
             200,
         )];
         let schedules_by_route = HashMap::new();
-        let importer = TestImporter::new(stations, trips, schedules, schedules_by_route);
+        let importer = TestImporter::new(
+            stations,
+            trips,
+            schedules,
+            schedules_by_route,
+            "source".to_string(),
+        );
 
         let mut service = ScheduleService::new(InMemoryTestRepository::empty());
         service.ingest(&importer);
@@ -377,7 +395,13 @@ mod tests {
             200,
         )];
         let schedules_by_route = HashMap::new();
-        let importer = TestImporter::new(stations, trips, schedules, schedules_by_route);
+        let importer = TestImporter::new(
+            stations,
+            trips,
+            schedules,
+            schedules_by_route,
+            "source".to_string(),
+        );
 
         let mut service = ScheduleService::new(InMemoryTestRepository::empty());
         service.ingest(&importer);
@@ -399,7 +423,13 @@ mod tests {
             ImportedTripLeg::new(route("R1"), sid("A"), sid("B"), 500, 600),
         ];
         let schedules_by_route = HashMap::new();
-        let importer = TestImporter::new(stations, trips, schedules, schedules_by_route);
+        let importer = TestImporter::new(
+            stations,
+            trips,
+            schedules,
+            schedules_by_route,
+            "source".to_string(),
+        );
 
         let mut service = ScheduleService::new(InMemoryTestRepository::empty());
         service.ingest(&importer);
