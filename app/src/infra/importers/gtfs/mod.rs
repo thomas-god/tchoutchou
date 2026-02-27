@@ -116,6 +116,12 @@ impl GTFSStopId {
     }
 }
 
+impl GTFSServiceId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 impl GTFSRouteId {
     pub fn as_str(&self) -> &str {
         &self.0

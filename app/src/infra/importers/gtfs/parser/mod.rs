@@ -95,7 +95,9 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::fs;
 
-    use crate::app::schedule::{ImportedRouteId, ImportedStation, ImportedStationId, ImportedTrip};
+    use crate::app::schedule::{
+        ImportTrainData, ImportedRouteId, ImportedStation, ImportedStationId, ImportedTrip,
+    };
     use crate::infra::importers::gtfs::importer::GTFSImporter;
 
     use super::*;
@@ -143,7 +145,7 @@ mod tests {
         let parser = GTFSParser::parse(dir.to_str().unwrap()).expect("parse should succeed");
         let importer = GTFSImporter::from_parser(&parser);
 
-        let mut stations = importer.stations();
+        let mut stations = importer.stations().to_vec();
         stations.sort_by_key(|s| s.id().clone());
         assert_eq!(
             stations,
@@ -163,7 +165,7 @@ mod tests {
             ]
         );
 
-        let mut trips = importer.trips();
+        let mut trips = importer.trip_legs().to_vec();
         trips.sort();
         assert_eq!(
             trips,

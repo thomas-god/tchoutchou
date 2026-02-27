@@ -30,6 +30,15 @@ pub struct ImportedSchedule {
     dates: Vec<String>,
 }
 
+impl ImportedSchedule {
+    pub fn id(&self) -> &ImportedScheduleId {
+        &self.id
+    }
+    pub fn dates(&self) -> &[String] {
+        &self.dates
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
 pub struct ImportedRouteId(String);
 

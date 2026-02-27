@@ -1,49 +1,57 @@
 use std::collections::HashMap;
 
-use crate::app::schedule::{ImportedRouteId, ImportedStation, ImportedStationId, ImportedTrip};
+use crate::app::schedule::{
+    ImportTrainData, ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation,
+    ImportedStationId, ImportedTrip,
+};
 
 use super::{
     GTFSExceptionType, GTFSLocationType, GTFSRawCalendarDate, GTFSRawStop, GTFSRawStopTime,
-    GTFSRawTrip, GTFSRouteId, GTFSService, GTFSServiceId, GTFSStation, GTFSStationId, GTFSStopId,
-    GTFSTripId, GTFSTripLeg, ParseGTFS,
+    GTFSRawTrip, GTFSRouteId, GTFSServiceId, GTFSStation, GTFSStationId, GTFSStopId, GTFSTripId,
+    GTFSTripLeg, ParseGTFS,
 };
 
 pub struct GTFSImporter {
-    stations: Vec<GTFSStation>,
-    trips: Vec<GTFSTripLeg>,
-    services: Vec<GTFSService>,
-    services_by_route: HashMap<GTFSRouteId, Vec<GTFSServiceId>>,
+    stations: Vec<ImportedStation>,
+    trips: Vec<ImportedTrip>,
+    schedules: Vec<ImportedSchedule>,
+    schedules_by_route: HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
 }
 
 impl GTFSImporter {
     pub fn from_parser(parser: &impl ParseGTFS) -> Self {
-        let stations = build_stations(parser.stops());
-        let trips = build_trip_legs(parser.stop_times(), parser.trips());
-        let services = build_services(parser.calendar_dates());
-        let services_by_route = build_services_by_route(parser.trips());
+        let gtfs_stations = build_stations(parser.stops());
+        let gtfs_trips = build_trip_legs(parser.stop_times(), parser.trips());
+
+        let stations = reconcile_stations(&gtfs_stations);
+        let trips = reconcile_trips(&gtfs_stations, &gtfs_trips);
+        let schedules = build_imported_schedules(parser.calendar_dates());
+        let schedules_by_route = build_imported_schedules_by_route(parser.trips());
 
         Self {
             stations,
             trips,
-            services,
-            services_by_route,
+            schedules,
+            schedules_by_route,
         }
     }
+}
 
-    pub fn stations(&self) -> Vec<ImportedStation> {
-        reconcile_stations(&self.stations)
+impl ImportTrainData for GTFSImporter {
+    fn stations(&self) -> &[ImportedStation] {
+        &self.stations
     }
 
-    pub fn trips(&self) -> Vec<ImportedTrip> {
-        reconcile_trips(&self.stations, &self.trips)
+    fn trip_legs(&self) -> &[ImportedTrip] {
+        &self.trips
     }
 
-    pub fn schedules(&self) -> &[GTFSService] {
-        &self.services
+    fn schedules(&self) -> &[ImportedSchedule] {
+        &self.schedules
     }
 
-    pub fn schedules_by_route(&self) -> &HashMap<GTFSRouteId, Vec<GTFSServiceId>> {
-        &self.services_by_route
+    fn schedules_by_route(&self) -> &HashMap<ImportedRouteId, Vec<ImportedScheduleId>> {
+        &self.schedules_by_route
     }
 }
 
@@ -124,12 +132,12 @@ fn build_trip_legs(stop_times: &[GTFSRawStopTime], trips_raw: &[GTFSRawTrip]) ->
     legs
 }
 
-/// Builds `GTFSService` schedules from raw calendar-date rows.
+/// Builds `ImportedSchedule` values from raw calendar-date rows.
 ///
 /// Only `ServiceAdded` rows contribute dates; `ServiceRemoved` rows are
-/// intentionally ignored here — they express exceptions to a base calendar
-/// that this feed does not include.
-fn build_services(calendar_dates: &[GTFSRawCalendarDate]) -> Vec<GTFSService> {
+/// intentionally ignored — they express exceptions to a base calendar that
+/// this feed does not include.
+fn build_imported_schedules(calendar_dates: &[GTFSRawCalendarDate]) -> Vec<ImportedSchedule> {
     let mut by_service: HashMap<GTFSServiceId, Vec<String>> = HashMap::new();
     for date in calendar_dates
         .iter()
@@ -142,18 +150,24 @@ fn build_services(calendar_dates: &[GTFSRawCalendarDate]) -> Vec<GTFSService> {
     }
     by_service
         .into_iter()
-        .map(|(id, dates)| GTFSService::new(id, dates))
+        .map(|(id, dates)| {
+            ImportedSchedule::new(ImportedScheduleId::from(id.as_str().to_owned()), dates)
+        })
         .collect()
 }
 
-/// Builds the route → services index from raw trip rows.
-fn build_services_by_route(trips_raw: &[GTFSRawTrip]) -> HashMap<GTFSRouteId, Vec<GTFSServiceId>> {
-    let mut by_route: HashMap<GTFSRouteId, Vec<GTFSServiceId>> = HashMap::new();
+/// Builds the route → schedule-ids index from raw trip rows.
+fn build_imported_schedules_by_route(
+    trips_raw: &[GTFSRawTrip],
+) -> HashMap<ImportedRouteId, Vec<ImportedScheduleId>> {
+    let mut by_route: HashMap<ImportedRouteId, Vec<ImportedScheduleId>> = HashMap::new();
     for trip in trips_raw {
         by_route
-            .entry(trip.route_id().clone())
+            .entry(ImportedRouteId::from(trip.route_id().as_str().to_owned()))
             .or_default()
-            .push(trip.service_id().clone());
+            .push(ImportedScheduleId::from(
+                trip.service_id().as_str().to_owned(),
+            ));
     }
     by_route
 }
@@ -198,6 +212,8 @@ fn reconcile_trips(stations: &[GTFSStation], trips: &[GTFSTripLeg]) -> Vec<Impor
 
 #[cfg(test)]
 mod tests {
+    use crate::app::schedule::ImportTrainData;
+
     use super::*;
 
     // ── test helpers ────────────────────────────────────────────────────────
@@ -292,7 +308,8 @@ mod tests {
             trips: vec![],
             calendar_dates: vec![],
         };
-        let mut result = GTFSImporter::from_parser(&parser).stations();
+        let importer = GTFSImporter::from_parser(&parser);
+        let mut result = importer.stations().to_vec();
         result.sort_by_key(|s| s.id().clone());
 
         assert_eq!(result.len(), 2);
@@ -318,7 +335,6 @@ mod tests {
 
     #[test]
     fn stop_rows_without_parent_are_not_exposed_as_stations() {
-        // A stop row with no parent_station should not appear as a station.
         let parser = StubParser {
             stops: vec![
                 raw_station("S1", "Paris Nord"),
@@ -335,7 +351,8 @@ mod tests {
             trips: vec![],
             calendar_dates: vec![],
         };
-        let result = GTFSImporter::from_parser(&parser).stations();
+        let importer = GTFSImporter::from_parser(&parser);
+        let result = importer.stations();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id(), &ImportedStationId::from("S1".to_owned()));
     }
@@ -352,7 +369,6 @@ mod tests {
                 raw_station("S2", "Lyon Perrache"),
                 raw_stop("S2-A", "S2"),
             ],
-            // Trip uses platform S1-B (child of S1) → S2-A (child of S2)
             stop_times: vec![
                 raw_stop_time("T1", "S1-B", 0, 800, 0),
                 raw_stop_time("T1", "S2-A", 1200, 0, 1),
@@ -360,7 +376,8 @@ mod tests {
             trips: vec![raw_trip("T1", "R1", "SVC1")],
             calendar_dates: vec![],
         };
-        let result = GTFSImporter::from_parser(&parser).trips();
+        let importer = GTFSImporter::from_parser(&parser);
+        let result = importer.trip_legs();
 
         assert_eq!(result.len(), 1);
         assert_eq!(
@@ -379,7 +396,6 @@ mod tests {
     fn trips_with_unknown_stops_are_dropped() {
         let parser = StubParser {
             stops: vec![raw_station("S1", "Paris Nord"), raw_stop("S1-A", "S1")],
-            // S2-X belongs to no station → leg must be dropped
             stop_times: vec![
                 raw_stop_time("T1", "S1-A", 0, 800, 0),
                 raw_stop_time("T1", "S2-X", 1200, 0, 1),
@@ -387,8 +403,8 @@ mod tests {
             trips: vec![raw_trip("T1", "R1", "SVC1")],
             calendar_dates: vec![],
         };
-        let result = GTFSImporter::from_parser(&parser).trips();
-        assert_eq!(result, vec![]);
+        let importer = GTFSImporter::from_parser(&parser);
+        assert!(importer.trip_legs().is_empty());
     }
 
     #[test]
@@ -411,7 +427,8 @@ mod tests {
             trips: vec![raw_trip("T1", "R1", "SVC1"), raw_trip("T2", "R1", "SVC2")],
             calendar_dates: vec![],
         };
-        let mut result = GTFSImporter::from_parser(&parser).trips();
+        let importer = GTFSImporter::from_parser(&parser);
+        let mut result = importer.trip_legs().to_vec();
         result.sort();
 
         let expected_origin = ImportedStationId::from("S1".to_owned());
@@ -424,7 +441,6 @@ mod tests {
 
     #[test]
     fn three_stop_trip_expands_into_all_pairs() {
-        // A → B → C should yield legs A→B, A→C, B→C
         let parser = StubParser {
             stops: vec![
                 raw_station("SA", "Station A"),
@@ -442,7 +458,8 @@ mod tests {
             trips: vec![raw_trip("T1", "R1", "SVC1")],
             calendar_dates: vec![],
         };
-        let mut result = GTFSImporter::from_parser(&parser).trips();
+        let importer = GTFSImporter::from_parser(&parser);
+        let mut result = importer.trip_legs().to_vec();
         result.sort();
 
         assert_eq!(result.len(), 3);
@@ -452,7 +469,7 @@ mod tests {
         assert!(dests.contains(&ImportedStationId::from("SC".to_owned())));
     }
 
-    // ── services ─────────────────────────────────────────────────────────────
+    // ── schedules ────────────────────────────────────────────────────────────
 
     #[test]
     fn service_added_dates_are_collected() {
@@ -479,11 +496,14 @@ mod tests {
             ],
         };
         let importer = GTFSImporter::from_parser(&parser);
-        let services = importer.schedules();
+        let schedules = importer.schedules();
 
-        assert_eq!(services.len(), 1);
-        assert_eq!(services[0].id(), &GTFSServiceId::from("SVC1".to_owned()));
-        let mut dates = services[0].dates().to_vec();
+        assert_eq!(schedules.len(), 1);
+        assert_eq!(
+            schedules[0].id(),
+            &ImportedScheduleId::from("SVC1".to_owned())
+        );
+        let mut dates = schedules[0].dates().to_vec();
         dates.sort();
         assert_eq!(dates, vec!["20260501", "20260508"]);
     }
@@ -503,17 +523,20 @@ mod tests {
         let importer = GTFSImporter::from_parser(&parser);
         let by_route = importer.schedules_by_route();
 
-        let r1 = GTFSRouteId::from("R1".to_owned());
-        let r2 = GTFSRouteId::from("R2".to_owned());
+        let r1 = ImportedRouteId::from("R1".to_owned());
+        let r2 = ImportedRouteId::from("R2".to_owned());
         let mut svc_r1 = by_route[&r1].clone();
         svc_r1.sort();
         assert_eq!(
             svc_r1,
             vec![
-                GTFSServiceId::from("SVC1".to_owned()),
-                GTFSServiceId::from("SVC2".to_owned()),
+                ImportedScheduleId::from("SVC1".to_owned()),
+                ImportedScheduleId::from("SVC2".to_owned()),
             ]
         );
-        assert_eq!(by_route[&r2], vec![GTFSServiceId::from("SVC3".to_owned())]);
+        assert_eq!(
+            by_route[&r2],
+            vec![ImportedScheduleId::from("SVC3".to_owned())]
+        );
     }
 }
