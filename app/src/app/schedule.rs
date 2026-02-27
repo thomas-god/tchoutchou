@@ -111,15 +111,27 @@ pub trait ImportTrainData {
     fn schedules_by_route(&self) -> &HashMap<ImportedRouteId, Vec<ImportedScheduleId>>;
 }
 
+/// Describes a change to a station detected during a timetable import.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StationChange {
+    /// The station did not exist in the repository before this import.
+    Added(ImportedStation),
+    /// The station existed but at least one attribute (name, lat, lon) changed.
+    Updated(ImportedStation),
+}
+
+/// Outcome returned by [`TrainDataRepository::import_timetable`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimetableImportResult {
+    /// Stations that are new or whose attributes changed in this import.
+    pub station_changes: Vec<StationChange>,
+}
+
 /// Persistence contract for stations, trips and schedules.
 pub trait TrainDataRepository {
-    fn save_stations(&mut self, stations: &[ImportedStation]);
-    fn save_schedules(&mut self, schedules: &[ImportedSchedule]);
-    fn save_trips(&mut self, trips: &[ImportedTripLeg]);
-    fn save_schedules_by_route(
-        &mut self,
-        mapping: &HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
-    );
+    /// Atomically replace all timetable data (trips, schedules, route–schedule mappings)
+    /// and upsert stations, returning information about which stations are new or changed.
+    fn import_timetable<D: ImportTrainData>(&mut self, data: &D) -> TimetableImportResult;
     fn all_stations(&self) -> Vec<ImportedStation>;
     fn all_schedules(&self) -> Vec<ImportedSchedule>;
     fn all_trips(&self) -> Vec<ImportedTripLeg>;
@@ -139,10 +151,9 @@ impl<R: TrainDataRepository> ScheduleService<R> {
     }
 
     /// Feed stations, schedules and trips from any importer into the repository.
-    pub fn ingest(&mut self, importer: &impl ImportTrainData) {
-        self.repository.save_schedules(importer.schedules());
-        self.repository.save_stations(importer.stations());
-        self.repository.save_trips(importer.trip_legs());
+    /// Returns a [`TimetableImportResult`] describing which stations are new or changed.
+    pub fn ingest(&mut self, importer: &impl ImportTrainData) -> TimetableImportResult {
+        self.repository.import_timetable(importer)
     }
 
     /// Build a [`Graph`] from everything currently held by the repository.
@@ -204,24 +215,38 @@ mod tests {
     }
 
     impl TrainDataRepository for InMemoryTestRepository {
-        fn save_stations(&mut self, stations: &[ImportedStation]) {
-            self.stations.extend_from_slice(stations);
-        }
-        fn save_schedules(&mut self, schedules: &[ImportedSchedule]) {
-            self.schedules.extend_from_slice(schedules);
-        }
-        fn save_trips(&mut self, trips: &[ImportedTripLeg]) {
-            self.trips.extend_from_slice(trips);
-        }
-        fn save_schedules_by_route(
-            &mut self,
-            mapping: &HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
-        ) {
-            for (route, schedules) in mapping {
-                self.schedules_by_route
-                    .insert(route.clone(), schedules.clone());
+        fn import_timetable<D: ImportTrainData>(&mut self, data: &D) -> TimetableImportResult {
+            let existing: HashMap<&ImportedStationId, &ImportedStation> =
+                self.stations.iter().map(|s| (s.id(), s)).collect();
+
+            let mut station_changes = Vec::new();
+            for s in data.stations() {
+                match existing.get(s.id()) {
+                    None => station_changes.push(StationChange::Added(s.clone())),
+                    Some(&old) if old != s => {
+                        station_changes.push(StationChange::Updated(s.clone()))
+                    }
+                    _ => {}
+                }
             }
+
+            // Upsert stations
+            for s in data.stations() {
+                if let Some(slot) = self.stations.iter_mut().find(|e| e.id() == s.id()) {
+                    *slot = s.clone();
+                } else {
+                    self.stations.push(s.clone());
+                }
+            }
+
+            // Replace volatile data atomically
+            self.schedules = data.schedules().to_vec();
+            self.trips = data.trip_legs().to_vec();
+            self.schedules_by_route = data.schedules_by_route().clone();
+
+            TimetableImportResult { station_changes }
         }
+
         fn all_stations(&self) -> Vec<ImportedStation> {
             self.stations.clone()
         }
