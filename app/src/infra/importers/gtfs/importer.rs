@@ -222,6 +222,10 @@ fn build_imported_schedules(calendar_dates: &[GTFSCalendarDate]) -> Vec<Imported
 }
 
 /// Builds the route → schedule-ids index from trip rows.
+///
+/// Duplicate `service_id` entries for the same route are deduplicated — a
+/// service appearing on a route is a binary fact; listing it twice carries no
+/// additional meaning.
 fn build_imported_schedules_by_route(
     trips: &[GTFSTrip],
 ) -> HashMap<ImportedRouteId, Vec<ImportedScheduleId>> {
@@ -233,6 +237,10 @@ fn build_imported_schedules_by_route(
             .push(ImportedScheduleId::from(
                 trip.service_id().as_str().to_owned(),
             ));
+    }
+    for services in by_route.values_mut() {
+        services.sort();
+        services.dedup();
     }
     by_route
 }
@@ -264,6 +272,9 @@ fn reconcile_trips(stations: &[GTFSStation], trips: &[GTFSTripLeg]) -> Vec<Impor
         .filter_map(|trip| {
             let origin_station = stop_to_station.get(trip.origin())?;
             let destination_station = stop_to_station.get(trip.destination())?;
+            if origin_station == destination_station {
+                return None;
+            }
             Some(ImportedTrip::new(
                 ImportedRouteId::from(trip.route().as_str().to_owned()),
                 ImportedStationId::from(origin_station.as_str().to_owned()),
@@ -602,6 +613,253 @@ mod tests {
         assert_eq!(
             by_route[&r2],
             vec![ImportedScheduleId::from("SVC3".to_owned())]
+        );
+    }
+
+    #[test]
+    fn duplicate_service_id_for_same_route_is_deduplicated() {
+        // Two trips on R1 share the same service_id; only one entry should appear.
+        let parser = StubParser {
+            stops: vec![],
+            stop_times: vec![],
+            trips: vec![trip("T1", "R1", "SVC1"), trip("T2", "R1", "SVC1")],
+            calendar_dates: vec![],
+        };
+        let importer = GTFSImporter::from_parser(&parser);
+        let by_route = importer.schedules_by_route();
+
+        let r1 = ImportedRouteId::from("R1".to_owned());
+        assert_eq!(
+            by_route[&r1],
+            vec![ImportedScheduleId::from("SVC1".to_owned())]
+        );
+    }
+
+    #[test]
+    fn all_service_removed_dates_produce_empty_schedules() {
+        let parser = StubParser {
+            stops: vec![],
+            stop_times: vec![],
+            trips: vec![],
+            calendar_dates: vec![
+                GTFSCalendarDate::new(
+                    GTFSServiceId::from("SVC1".to_owned()),
+                    "20260501".to_owned(),
+                    GTFSExceptionType::ServiceRemoved,
+                ),
+                GTFSCalendarDate::new(
+                    GTFSServiceId::from("SVC1".to_owned()),
+                    "20260508".to_owned(),
+                    GTFSExceptionType::ServiceRemoved,
+                ),
+            ],
+        };
+        let importer = GTFSImporter::from_parser(&parser);
+        assert!(importer.schedules().is_empty());
+    }
+
+    #[test]
+    fn multiple_distinct_services_produce_multiple_schedules() {
+        let parser = StubParser {
+            stops: vec![],
+            stop_times: vec![],
+            trips: vec![],
+            calendar_dates: vec![
+                GTFSCalendarDate::new(
+                    GTFSServiceId::from("SVC1".to_owned()),
+                    "20260501".to_owned(),
+                    GTFSExceptionType::ServiceAdded,
+                ),
+                GTFSCalendarDate::new(
+                    GTFSServiceId::from("SVC2".to_owned()),
+                    "20260502".to_owned(),
+                    GTFSExceptionType::ServiceAdded,
+                ),
+                GTFSCalendarDate::new(
+                    GTFSServiceId::from("SVC2".to_owned()),
+                    "20260509".to_owned(),
+                    GTFSExceptionType::ServiceAdded,
+                ),
+            ],
+        };
+        let importer = GTFSImporter::from_parser(&parser);
+        let mut schedules = importer.schedules().to_vec();
+        schedules.sort_by_key(|s| s.id().clone());
+
+        assert_eq!(schedules.len(), 2);
+        assert_eq!(
+            schedules[0].id(),
+            &ImportedScheduleId::from("SVC1".to_owned())
+        );
+        assert_eq!(schedules[0].dates(), &["20260501"]);
+        assert_eq!(
+            schedules[1].id(),
+            &ImportedScheduleId::from("SVC2".to_owned())
+        );
+        let mut dates2 = schedules[1].dates().to_vec();
+        dates2.sort();
+        assert_eq!(dates2, vec!["20260502", "20260509"]);
+    }
+
+    // ── stations (additional) ────────────────────────────────────────────────
+
+    #[test]
+    fn station_with_no_child_stops_is_still_included() {
+        let parser = StubParser {
+            stops: vec![station("S1", "Paris Nord")],
+            stop_times: vec![],
+            trips: vec![],
+            calendar_dates: vec![],
+        };
+        let importer = GTFSImporter::from_parser(&parser);
+        let result = importer.stations();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id(), &ImportedStationId::from("S1".to_owned()));
+    }
+
+    #[test]
+    fn station_lat_lon_are_propagated() {
+        let parser = StubParser {
+            stops: vec![GTFSStop::new(
+                sid("S1"),
+                "Marseille Saint-Charles".to_owned(),
+                43.3026,
+                5.3800,
+                GTFSLocationType::Station,
+                None,
+            )],
+            stop_times: vec![],
+            trips: vec![],
+            calendar_dates: vec![],
+        };
+        let importer = GTFSImporter::from_parser(&parser);
+        let result = importer.stations();
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0],
+            ImportedStation::new(
+                ImportedStationId::from("S1".to_owned()),
+                "Marseille Saint-Charles".to_owned(),
+                43.3026,
+                5.3800,
+            )
+        );
+    }
+
+    // ── trips (additional) ───────────────────────────────────────────────────
+
+    #[test]
+    fn single_stop_trip_produces_no_legs() {
+        let parser = StubParser {
+            stops: vec![station("S1", "Paris Nord"), stop("S1-A", "S1")],
+            stop_times: vec![stop_time("T1", "S1-A", 0, 800, 0)],
+            trips: vec![trip("T1", "R1", "SVC1")],
+            calendar_dates: vec![],
+        };
+        let importer = GTFSImporter::from_parser(&parser);
+        assert!(importer.trip_legs().is_empty());
+    }
+
+    #[test]
+    fn trip_id_absent_from_trips_table_is_dropped() {
+        // stop_times references "T1" but the trips table is empty.
+        let parser = StubParser {
+            stops: vec![
+                station("S1", "Paris Nord"),
+                stop("S1-A", "S1"),
+                station("S2", "Lyon Perrache"),
+                stop("S2-A", "S2"),
+            ],
+            stop_times: vec![
+                stop_time("T1", "S1-A", 0, 800, 0),
+                stop_time("T1", "S2-A", 1200, 0, 1),
+            ],
+            trips: vec![],
+            calendar_dates: vec![],
+        };
+        let importer = GTFSImporter::from_parser(&parser);
+        assert!(importer.trip_legs().is_empty());
+    }
+
+    #[test]
+    fn leg_where_both_stops_belong_to_same_station_is_dropped() {
+        // Two platform stops of the same station appear in one trip;
+        // the reconciled leg would have origin == destination, which carries
+        // no domain meaning, so it must be filtered out.
+        let parser = StubParser {
+            stops: vec![
+                station("S1", "Paris Nord"),
+                stop("S1-A", "S1"),
+                stop("S1-B", "S1"),
+            ],
+            stop_times: vec![
+                stop_time("T1", "S1-A", 0, 800, 0),
+                stop_time("T1", "S1-B", 900, 0, 1),
+            ],
+            trips: vec![trip("T1", "R1", "SVC1")],
+            calendar_dates: vec![],
+        };
+        let importer = GTFSImporter::from_parser(&parser);
+        assert!(importer.trip_legs().is_empty());
+    }
+
+    // ── integration ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn full_pipeline_integration() {
+        let parser = StubParser {
+            stops: vec![
+                station("S1", "Paris Nord"),
+                stop("S1-A", "S1"),
+                station("S2", "Lyon Perrache"),
+                stop("S2-A", "S2"),
+            ],
+            stop_times: vec![
+                stop_time("T1", "S1-A", 0, 800, 0),
+                stop_time("T1", "S2-A", 1200, 0, 1),
+            ],
+            trips: vec![trip("T1", "R1", "SVC1")],
+            calendar_dates: vec![GTFSCalendarDate::new(
+                GTFSServiceId::from("SVC1".to_owned()),
+                "20260601".to_owned(),
+                GTFSExceptionType::ServiceAdded,
+            )],
+        };
+        let importer = GTFSImporter::from_parser(&parser);
+
+        // stations
+        let mut stations = importer.stations().to_vec();
+        stations.sort_by_key(|s| s.id().clone());
+        assert_eq!(stations.len(), 2);
+        assert_eq!(stations[0].id(), &ImportedStationId::from("S1".to_owned()));
+        assert_eq!(stations[1].id(), &ImportedStationId::from("S2".to_owned()));
+
+        // trip legs
+        let legs = importer.trip_legs();
+        assert_eq!(legs.len(), 1);
+        assert_eq!(legs[0].origin(), &ImportedStationId::from("S1".to_owned()));
+        assert_eq!(
+            legs[0].destination(),
+            &ImportedStationId::from("S2".to_owned())
+        );
+        assert_eq!(legs[0].departure(), 800);
+        assert_eq!(legs[0].arrival(), 1200);
+
+        // schedules
+        let schedules = importer.schedules();
+        assert_eq!(schedules.len(), 1);
+        assert_eq!(
+            schedules[0].id(),
+            &ImportedScheduleId::from("SVC1".to_owned())
+        );
+        assert_eq!(schedules[0].dates(), &["20260601"]);
+
+        // schedules_by_route
+        let by_route = importer.schedules_by_route();
+        let r1 = ImportedRouteId::from("R1".to_owned());
+        assert_eq!(
+            by_route[&r1],
+            vec![ImportedScheduleId::from("SVC1".to_owned())]
         );
     }
 }
