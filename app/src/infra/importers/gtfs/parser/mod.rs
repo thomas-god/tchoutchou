@@ -7,6 +7,10 @@ use crate::infra::importers::gtfs::{
 
 mod stations;
 mod trips;
+pub mod calendar_dates;
+pub mod stop_times;
+pub mod stops;
+pub mod trips_file;
 
 #[derive(Debug)]
 pub enum GTFSParseError {
