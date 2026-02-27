@@ -72,63 +72,98 @@ impl SqliteRepository {
 
 impl TrainDataRepository for SqliteRepository {
     fn save_stations(&mut self, stations: &[ImportedStation]) {
-        for s in stations {
-            self.conn
-                .execute(
+        println!("Persisting {} stations", stations.len());
+        let tx = self
+            .conn
+            .transaction()
+            .expect("save_stations: begin transaction failed");
+        {
+            let mut stmt = tx
+                .prepare_cached(
                     "INSERT OR REPLACE INTO stations (id, name, lat, lon)
                      VALUES (?1, ?2, ?3, ?4)",
-                    params![s.id().as_str(), s.name(), s.lat(), s.lon()],
                 )
-                .expect("save_stations: INSERT failed");
+                .expect("save_stations: prepare failed");
+            for s in stations {
+                stmt.execute(params![s.id().as_str(), s.name(), s.lat(), s.lon()])
+                    .expect("save_stations: INSERT failed");
+            }
         }
+        tx.commit().expect("save_stations: commit failed");
     }
 
     fn save_schedules(&mut self, schedules: &[ImportedSchedule]) {
-        for s in schedules {
-            let dates = s.dates().join(",");
-            self.conn
-                .execute(
+        println!("Persisting {} schedules", schedules.len());
+        let tx = self
+            .conn
+            .transaction()
+            .expect("save_schedules: begin transaction failed");
+        {
+            let mut stmt = tx
+                .prepare_cached(
                     "INSERT OR REPLACE INTO schedules (id, dates)
                      VALUES (?1, ?2)",
-                    params![s.id().as_str(), dates],
                 )
-                .expect("save_schedules: INSERT failed");
+                .expect("save_schedules: prepare failed");
+            for s in schedules {
+                let dates = s.dates().join(",");
+                stmt.execute(params![s.id().as_str(), dates])
+                    .expect("save_schedules: INSERT failed");
+            }
         }
+        tx.commit().expect("save_schedules: commit failed");
     }
 
     fn save_trips(&mut self, trips: &[ImportedTripLeg]) {
-        for t in trips {
-            self.conn
-                .execute(
+        println!("Persisting {} trips", trips.len());
+        let tx = self
+            .conn
+            .transaction()
+            .expect("save_trips: begin transaction failed");
+        {
+            let mut stmt = tx
+                .prepare_cached(
                     "INSERT INTO trips (route, origin, destination, departure, arrival)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![
-                        t.route().as_str(),
-                        t.origin().as_str(),
-                        t.destination().as_str(),
-                        t.departure() as i64,
-                        t.arrival() as i64,
-                    ],
                 )
+                .expect("save_trips: prepare failed");
+            for t in trips {
+                stmt.execute(params![
+                    t.route().as_str(),
+                    t.origin().as_str(),
+                    t.destination().as_str(),
+                    t.departure() as i64,
+                    t.arrival() as i64,
+                ])
                 .expect("save_trips: INSERT failed");
+            }
         }
+        tx.commit().expect("save_trips: commit failed");
     }
 
     fn save_schedules_by_route(
         &mut self,
         mapping: &HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
     ) {
-        for (route, schedules) in mapping {
-            for schedule in schedules {
-                self.conn
-                    .execute(
-                        "INSERT OR IGNORE INTO route_schedules (route_id, schedule_id)
-                         VALUES (?1, ?2)",
-                        params![route.as_str(), schedule.as_str()],
-                    )
-                    .expect("save_schedules_by_route: INSERT failed");
+        let tx = self
+            .conn
+            .transaction()
+            .expect("save_schedules_by_route: begin transaction failed");
+        {
+            let mut stmt = tx
+                .prepare_cached(
+                    "INSERT OR IGNORE INTO route_schedules (route_id, schedule_id)
+                     VALUES (?1, ?2)",
+                )
+                .expect("save_schedules_by_route: prepare failed");
+            for (route, schedules) in mapping {
+                for schedule in schedules {
+                    stmt.execute(params![route.as_str(), schedule.as_str()])
+                        .expect("save_schedules_by_route: INSERT failed");
+                }
             }
         }
+        tx.commit().expect("save_schedules_by_route: commit failed");
     }
 
     fn all_stations(&self) -> Vec<ImportedStation> {
