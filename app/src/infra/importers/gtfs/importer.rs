@@ -4,7 +4,7 @@ use derive_more::{Constructor, From};
 
 use crate::app::schedule::{
     ImportTrainData, ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation,
-    ImportedStationId, ImportedTrip,
+    ImportedStationId, ImportedTripLeg,
 };
 
 use super::{
@@ -80,7 +80,7 @@ impl GTFSTripLeg {
 
 pub struct GTFSImporter {
     stations: Vec<ImportedStation>,
-    trips: Vec<ImportedTrip>,
+    trips: Vec<ImportedTripLeg>,
     schedules: Vec<ImportedSchedule>,
     schedules_by_route: HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
 }
@@ -109,7 +109,7 @@ impl ImportTrainData for GTFSImporter {
         &self.stations
     }
 
-    fn trip_legs(&self) -> &[ImportedTrip] {
+    fn trip_legs(&self) -> &[ImportedTripLeg] {
         &self.trips
     }
 
@@ -259,7 +259,7 @@ fn reconcile_stations(stations: &[GTFSStation]) -> Vec<ImportedStation> {
         .collect()
 }
 
-fn reconcile_trips(stations: &[GTFSStation], trips: &[GTFSTripLeg]) -> Vec<ImportedTrip> {
+fn reconcile_trips(stations: &[GTFSStation], trips: &[GTFSTripLeg]) -> Vec<ImportedTripLeg> {
     // Build a reverse map: GTFSStopId → GTFSStationId, because GTFSTripLeg
     // references platform stops while ImportedTrip references stations.
     let stop_to_station: HashMap<&GTFSStopId, &GTFSStationId> = stations
@@ -275,7 +275,7 @@ fn reconcile_trips(stations: &[GTFSStation], trips: &[GTFSTripLeg]) -> Vec<Impor
             if origin_station == destination_station {
                 return None;
             }
-            Some(ImportedTrip::new(
+            Some(ImportedTripLeg::new(
                 ImportedRouteId::from(trip.route().as_str().to_owned()),
                 ImportedStationId::from(origin_station.as_str().to_owned()),
                 ImportedStationId::from(destination_station.as_str().to_owned()),
@@ -458,7 +458,7 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(
             result[0],
-            ImportedTrip::new(
+            ImportedTripLeg::new(
                 ImportedRouteId::from("R1".to_owned()),
                 ImportedStationId::from("S1".to_owned()),
                 ImportedStationId::from("S2".to_owned()),

@@ -7,6 +7,7 @@ use crate::domain::optim::{Graph, StationId, Trip};
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
 pub struct ImportedStationId(String);
 
+/// A station represents a physical place where trains can depart from and arrive at.
 #[derive(Debug, Clone, PartialEq, Constructor)]
 pub struct ImportedStation {
     id: ImportedStationId,
@@ -19,11 +20,27 @@ impl ImportedStation {
     pub fn id(&self) -> &ImportedStationId {
         &self.id
     }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn lat(&self) -> f64 {
+        self.lat
+    }
+    pub fn lon(&self) -> f64 {
+        self.lon
+    }
+}
+
+impl ImportedStationId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
 pub struct ImportedScheduleId(String);
 
+/// A schedule is a set of dates for which a particular trip/train will run.
 #[derive(Debug, Clone, Constructor, PartialEq)]
 pub struct ImportedSchedule {
     id: ImportedScheduleId,
@@ -39,11 +56,29 @@ impl ImportedSchedule {
     }
 }
 
+impl ImportedScheduleId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A route is an abstract concept that group trip that share some caracteristics (headsign,
+/// schedule, etc.). For our domain, it's mostly used as an intermediary way to map a trip leg
+/// to its schedules.
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
 pub struct ImportedRouteId(String);
 
+impl ImportedRouteId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A trip leg is the core concept used by our domain. It represents a train leaving its origin
+/// station at departure and reaching its destination at arrival. The actual dates the train will
+/// actually run needs to be retrieve by the schedules associated with its [`ImportedRouteId`].
 #[derive(Debug, Clone, Constructor, PartialEq, PartialOrd, Eq, Ord)]
-pub struct ImportedTrip {
+pub struct ImportedTripLeg {
     route: ImportedRouteId,
     origin: ImportedStationId,
     destination: ImportedStationId,
@@ -51,7 +86,7 @@ pub struct ImportedTrip {
     arrival: usize,
 }
 
-impl ImportedTrip {
+impl ImportedTripLeg {
     pub fn origin(&self) -> &ImportedStationId {
         &self.origin
     }
@@ -71,30 +106,34 @@ impl ImportedTrip {
 
 pub trait ImportTrainData {
     fn stations(&self) -> &[ImportedStation];
-    fn trip_legs(&self) -> &[ImportedTrip];
+    fn trip_legs(&self) -> &[ImportedTripLeg];
     fn schedules(&self) -> &[ImportedSchedule];
     fn schedules_by_route(&self) -> &HashMap<ImportedRouteId, Vec<ImportedScheduleId>>;
 }
 
-/// Persistence contract for stations and trips. Infrastructure crates provide
-/// concrete implementations (in-memory, database, …).
-pub trait StationAndTripRepository {
+/// Persistence contract for stations, trips and schedules.
+pub trait TrainDataRepository {
     fn save_stations(&mut self, stations: &[ImportedStation]);
     fn save_schedules(&mut self, schedules: &[ImportedSchedule]);
-    fn save_trips(&mut self, trips: &[ImportedTrip]);
+    fn save_trips(&mut self, trips: &[ImportedTripLeg]);
+    fn save_schedules_by_route(
+        &mut self,
+        mapping: &HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
+    );
     fn all_stations(&self) -> Vec<ImportedStation>;
     fn all_schedules(&self) -> Vec<ImportedSchedule>;
-    fn all_trips(&self) -> Vec<ImportedTrip>;
+    fn all_trips(&self) -> Vec<ImportedTripLeg>;
+    fn schedules_by_route(&self) -> HashMap<ImportedRouteId, Vec<ImportedScheduleId>>;
 }
 
 /// Application service that aggregates data from various importers, persists it
 /// through a [`StationAndTripRepository`], and exposes a [`Graph`] ready for the
 /// optimisation algorithms in [`crate::domain::optim`].
-pub struct ScheduleService<R: StationAndTripRepository> {
+pub struct ScheduleService<R: TrainDataRepository> {
     repository: R,
 }
 
-impl<R: StationAndTripRepository> ScheduleService<R> {
+impl<R: TrainDataRepository> ScheduleService<R> {
     pub fn new(repository: R) -> Self {
         Self { repository }
     }
@@ -104,7 +143,7 @@ impl<R: StationAndTripRepository> ScheduleService<R> {
         &mut self,
         stations: &[ImportedStation],
         schedules: &[ImportedSchedule],
-        trips: &[ImportedTrip],
+        trips: &[ImportedTripLeg],
     ) {
         self.repository.save_schedules(schedules);
         self.repository.save_stations(stations);
@@ -123,7 +162,7 @@ impl<R: StationAndTripRepository> ScheduleService<R> {
 ///
 /// `ImportedStationId` strings are mapped to compact [`StationId`] integers by
 /// enumeration order so that the graph stays independent from the raw string ids.
-fn build_graph(stations: &[ImportedStation], trips: &[ImportedTrip]) -> Graph {
+fn build_graph(stations: &[ImportedStation], trips: &[ImportedTripLeg]) -> Graph {
     let id_map: HashMap<&ImportedStationId, StationId> = stations
         .iter()
         .enumerate()
@@ -154,7 +193,8 @@ mod tests {
     struct InMemoryRepository {
         stations: Vec<ImportedStation>,
         schedules: Vec<ImportedSchedule>,
-        trips: Vec<ImportedTrip>,
+        trips: Vec<ImportedTripLeg>,
+        schedules_by_route: HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
     }
 
     impl InMemoryRepository {
@@ -163,19 +203,29 @@ mod tests {
                 stations: vec![],
                 schedules: vec![],
                 trips: vec![],
+                schedules_by_route: HashMap::new(),
             }
         }
     }
 
-    impl StationAndTripRepository for InMemoryRepository {
+    impl TrainDataRepository for InMemoryRepository {
         fn save_stations(&mut self, stations: &[ImportedStation]) {
             self.stations.extend_from_slice(stations);
         }
         fn save_schedules(&mut self, schedules: &[ImportedSchedule]) {
             self.schedules.extend_from_slice(schedules);
         }
-        fn save_trips(&mut self, trips: &[ImportedTrip]) {
+        fn save_trips(&mut self, trips: &[ImportedTripLeg]) {
             self.trips.extend_from_slice(trips);
+        }
+        fn save_schedules_by_route(
+            &mut self,
+            mapping: &HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
+        ) {
+            for (route, schedules) in mapping {
+                self.schedules_by_route
+                    .insert(route.clone(), schedules.clone());
+            }
         }
         fn all_stations(&self) -> Vec<ImportedStation> {
             self.stations.clone()
@@ -183,8 +233,11 @@ mod tests {
         fn all_schedules(&self) -> Vec<ImportedSchedule> {
             self.schedules.clone()
         }
-        fn all_trips(&self) -> Vec<ImportedTrip> {
+        fn all_trips(&self) -> Vec<ImportedTripLeg> {
             self.trips.clone()
+        }
+        fn schedules_by_route(&self) -> HashMap<ImportedRouteId, Vec<ImportedScheduleId>> {
+            self.schedules_by_route.clone()
         }
     }
 
@@ -212,7 +265,13 @@ mod tests {
             ImportedScheduleId::from("schedule_1".to_string()),
             vec!["20260102".to_string()],
         )];
-        let trips = vec![ImportedTrip::new(route("R1"), sid("A"), sid("B"), 100, 200)];
+        let trips = vec![ImportedTripLeg::new(
+            route("R1"),
+            sid("A"),
+            sid("B"),
+            100,
+            200,
+        )];
 
         let mut service = ScheduleService::new(InMemoryRepository::empty());
         service.ingest(&stations, &schedules, &trips);
@@ -236,7 +295,13 @@ mod tests {
             vec!["20260102".to_string()],
         )];
         // "X" is not in the station list
-        let trips = vec![ImportedTrip::new(route("R1"), sid("X"), sid("B"), 100, 200)];
+        let trips = vec![ImportedTripLeg::new(
+            route("R1"),
+            sid("X"),
+            sid("B"),
+            100,
+            200,
+        )];
 
         let mut service = ScheduleService::new(InMemoryRepository::empty());
         service.ingest(&stations, &schedules, &trips);
@@ -254,7 +319,13 @@ mod tests {
             vec!["20260102".to_string()],
         )];
         // "X" is not in the station list
-        let trips = vec![ImportedTrip::new(route("R1"), sid("A"), sid("X"), 100, 200)];
+        let trips = vec![ImportedTripLeg::new(
+            route("R1"),
+            sid("A"),
+            sid("X"),
+            100,
+            200,
+        )];
 
         let mut service = ScheduleService::new(InMemoryRepository::empty());
         service.ingest(&stations, &schedules, &trips);
@@ -271,9 +342,9 @@ mod tests {
             vec!["20260102".to_string()],
         )];
         let trips = vec![
-            ImportedTrip::new(route("R1"), sid("A"), sid("B"), 100, 200),
-            ImportedTrip::new(route("R1"), sid("A"), sid("C"), 300, 400),
-            ImportedTrip::new(route("R1"), sid("A"), sid("B"), 500, 600),
+            ImportedTripLeg::new(route("R1"), sid("A"), sid("B"), 100, 200),
+            ImportedTripLeg::new(route("R1"), sid("A"), sid("C"), 300, 400),
+            ImportedTripLeg::new(route("R1"), sid("A"), sid("B"), 500, 600),
         ];
 
         let mut service = ScheduleService::new(InMemoryRepository::empty());
