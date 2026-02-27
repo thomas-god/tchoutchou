@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use derive_more::Constructor;
 
 use crate::infra::importers::gtfs::{
-    GTFSRouteId, GTFSService, GTFSServiceId, GTFSStopId, GTFSTripId, parser::GTFSTripLeg,
+    GTFSRouteId, GTFSService, GTFSServiceId, GTFSStopId, GTFSTripId, GTFSTripLeg,
 };
 
 use super::GTFSParseError;

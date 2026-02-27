@@ -1,15 +1,17 @@
-use std::collections::HashMap;
-
 use derive_more::{Constructor, From};
 
 pub mod importer;
 pub mod parser;
 
+/// The interface a GTFS data source must implement.
+/// Methods return flat, unprocessed rows straight from the CSV files.
+/// All semantic transformation (stop grouping, trip expansion, etc.) is the
+/// responsibility of [`importer::GTFSImporter`].
 pub trait ParseGTFS {
-    fn stations(&self) -> &[GTFSStation];
-    fn trips(&self) -> &[GTFSTripLeg];
-    fn schedules(&self) -> &[GTFSService];
-    fn schedules_by_route(&self) -> &HashMap<GTFSRouteId, Vec<GTFSServiceId>>;
+    fn stops(&self) -> &[GTFSRawStop];
+    fn stop_times(&self) -> &[GTFSRawStopTime];
+    fn trips(&self) -> &[GTFSRawTrip];
+    fn calendar_dates(&self) -> &[GTFSRawCalendarDate];
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
@@ -58,6 +60,15 @@ pub struct GTFSService {
     dates: Vec<String>,
 }
 
+impl GTFSService {
+    pub fn id(&self) -> &GTFSServiceId {
+        &self.id
+    }
+    pub fn dates(&self) -> &[String] {
+        &self.dates
+    }
+}
+
 /// A `GTFSRouteId` represent a set of stops that belong to the same physical train and trip. It can
 /// be used amongst other things to find the `GTFSSchedule`s for a given `GTFSTrip`.
 #[derive(Debug, Clone, PartialEq, PartialOrd, From, Hash, Eq, Ord)]
@@ -94,6 +105,12 @@ impl GTFSTripLeg {
 }
 
 impl GTFSStationId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl GTFSStopId {
     pub fn as_str(&self) -> &str {
         &self.0
     }

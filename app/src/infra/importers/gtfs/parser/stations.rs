@@ -1,6 +1,6 @@
 use derive_more::Constructor;
 
-use crate::infra::importers::gtfs::{GTFSStationId, GTFSStopId, parser::GTFSStation};
+use crate::infra::importers::gtfs::{GTFSStation, GTFSStationId, GTFSStopId};
 
 use super::GTFSParseError;
 
