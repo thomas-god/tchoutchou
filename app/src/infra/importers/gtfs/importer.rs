@@ -8,8 +8,8 @@ use crate::app::schedule::{
 };
 
 use super::{
-    GTFSCalendarDate, GTFSExceptionType, GTFSLocationType, GTFSRouteId, GTFSServiceId, GTFSStop,
-    GTFSStopId, GTFSStopTime, GTFSTrip, GTFSTripId, ParseGTFS,
+    GTFSCalendar, GTFSCalendarDate, GTFSExceptionType, GTFSLocationType, GTFSRouteId,
+    GTFSServiceId, GTFSStop, GTFSStopId, GTFSStopTime, GTFSTrip, GTFSTripId, ParseGTFS,
 };
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
@@ -93,7 +93,7 @@ impl GTFSImporter {
 
         let stations = reconcile_stations(&gtfs_stations);
         let trips = reconcile_trips(&gtfs_stations, &gtfs_trips);
-        let schedules = build_imported_schedules(parser.calendar_dates());
+        let schedules = build_imported_schedules(parser.calendar(), parser.calendar_dates());
         let schedules_by_route = build_imported_schedules_by_route(parser.trips());
 
         Self {
@@ -203,26 +203,90 @@ fn build_trip_legs(stop_times: &[GTFSStopTime], trips: &[GTFSTrip]) -> Vec<GTFST
     legs
 }
 
-/// Builds `ImportedSchedule` values from calendar-date rows.
+/// Builds `ImportedSchedule` values from calendar and calendar-date rows.
 ///
-/// Only `ServiceAdded` rows contribute dates; `ServiceRemoved` rows are
-/// intentionally ignored — they express exceptions to a base calendar that
-/// this feed does not include.
-fn build_imported_schedules(calendar_dates: &[GTFSCalendarDate]) -> Vec<ImportedSchedule> {
-    let mut by_service: HashMap<GTFSServiceId, Vec<String>> = HashMap::new();
-    for date in calendar_dates
-        .iter()
-        .filter(|d| d.exception_type() == GTFSExceptionType::ServiceAdded)
-    {
-        by_service
-            .entry(date.service_id().clone())
-            .or_default()
-            .push(date.date().to_owned());
+/// Supports both GTFS scheduling methods:
+///
+/// - **Method 1** (calendar-dates only): `ServiceAdded` rows in
+///   `calendar_dates.txt` enumerate every date the service runs. A
+///   corresponding `ServiceRemoved` row by itself (with no `calendar.txt`
+///   entry for the same service) is a no-op.
+///
+/// - **Method 2** (calendar + calendar-dates): Each row in `calendar.txt`
+///   defines a weekly frequency and date range that is first expanded into
+///   the full set of matching calendar dates. `ServiceAdded` exceptions then
+///   inject additional dates, and `ServiceRemoved` exceptions cancel them.
+///
+/// Services that end up with no dates after applying all rules are omitted
+/// from the output.
+fn build_imported_schedules(
+    calendars: &[GTFSCalendar],
+    calendar_dates: &[GTFSCalendarDate],
+) -> Vec<ImportedSchedule> {
+    use chrono::{Datelike, Duration, NaiveDate, Weekday};
+    use std::collections::HashSet;
+
+    let mut by_service: HashMap<GTFSServiceId, HashSet<String>> = HashMap::new();
+
+    // Step 1: expand weekly calendar.txt entries into explicit date sets.
+    for cal in calendars {
+        let (Some(start), Some(end)) = (
+            NaiveDate::parse_from_str(cal.start_date(), "%Y%m%d").ok(),
+            NaiveDate::parse_from_str(cal.end_date(), "%Y%m%d").ok(),
+        ) else {
+            continue;
+        };
+
+        let enabled: [(Weekday, bool); 7] = [
+            (Weekday::Mon, cal.monday()),
+            (Weekday::Tue, cal.tuesday()),
+            (Weekday::Wed, cal.wednesday()),
+            (Weekday::Thu, cal.thursday()),
+            (Weekday::Fri, cal.friday()),
+            (Weekday::Sat, cal.saturday()),
+            (Weekday::Sun, cal.sunday()),
+        ];
+
+        let dates = by_service
+            .entry(cal.service_id().clone())
+            .or_default();
+        let mut current = start;
+        while current <= end {
+            if enabled
+                .iter()
+                .any(|(wd, on)| *on && *wd == current.weekday())
+            {
+                dates.insert(current.format("%Y%m%d").to_string());
+            }
+            current += Duration::days(1);
+        }
     }
+
+    // Step 2: apply calendar_dates.txt exceptions.
+    for date in calendar_dates {
+        match date.exception_type() {
+            GTFSExceptionType::ServiceAdded => {
+                by_service
+                    .entry(date.service_id().clone())
+                    .or_default()
+                    .insert(date.date().to_owned());
+            }
+            GTFSExceptionType::ServiceRemoved => {
+                if let Some(dates) = by_service.get_mut(date.service_id()) {
+                    dates.remove(date.date());
+                }
+            }
+        }
+    }
+
+    // Step 3: convert to domain type, dropping services with no remaining dates.
     by_service
         .into_iter()
+        .filter(|(_, dates)| !dates.is_empty())
         .map(|(id, dates)| {
-            ImportedSchedule::new(ImportedScheduleId::from(id.as_str().to_owned()), dates)
+            let mut dates_vec: Vec<String> = dates.into_iter().collect();
+            dates_vec.sort();
+            ImportedSchedule::new(ImportedScheduleId::from(id.as_str().to_owned()), dates_vec)
         })
         .collect()
 }
@@ -356,6 +420,7 @@ mod tests {
         stops: Vec<GTFSStop>,
         stop_times: Vec<GTFSStopTime>,
         trips: Vec<GTFSTrip>,
+        calendar: Vec<GTFSCalendar>,
         calendar_dates: Vec<GTFSCalendarDate>,
     }
 
@@ -368,6 +433,9 @@ mod tests {
         }
         fn trips(&self) -> &[GTFSTrip] {
             &self.trips
+        }
+        fn calendar(&self) -> &[GTFSCalendar] {
+            &self.calendar
         }
         fn calendar_dates(&self) -> &[GTFSCalendarDate] {
             &self.calendar_dates
@@ -388,6 +456,7 @@ mod tests {
             ],
             stop_times: vec![],
             trips: vec![],
+            calendar: vec![],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser, "source");
@@ -431,6 +500,7 @@ mod tests {
             ],
             stop_times: vec![],
             trips: vec![],
+            calendar: vec![],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser, "source");
@@ -456,6 +526,7 @@ mod tests {
                 stop_time("T1", "S2-A", 1200, 0, 1),
             ],
             trips: vec![trip("T1", "R1", "SVC1")],
+            calendar: vec![],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser, "source");
@@ -483,6 +554,7 @@ mod tests {
                 stop_time("T1", "S2-X", 1200, 0, 1),
             ],
             trips: vec![trip("T1", "R1", "SVC1")],
+            calendar: vec![],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser, "source");
@@ -507,6 +579,7 @@ mod tests {
                 stop_time("T2", "S2-B", 1300, 0, 1),
             ],
             trips: vec![trip("T1", "R1", "SVC1"), trip("T2", "R1", "SVC2")],
+            calendar: vec![],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser, "source");
@@ -538,6 +611,7 @@ mod tests {
                 stop_time("T1", "C", 1800, 0, 2),
             ],
             trips: vec![trip("T1", "R1", "SVC1")],
+            calendar: vec![],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser, "source");
@@ -559,6 +633,7 @@ mod tests {
             stops: vec![],
             stop_times: vec![],
             trips: vec![],
+            calendar: vec![],
             calendar_dates: vec![
                 GTFSCalendarDate::new(
                     GTFSServiceId::from("SVC1".to_owned()),
@@ -600,6 +675,7 @@ mod tests {
                 trip("T2", "R1", "SVC2"),
                 trip("T3", "R2", "SVC3"),
             ],
+            calendar: vec![],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser, "source");
@@ -629,6 +705,7 @@ mod tests {
             stops: vec![],
             stop_times: vec![],
             trips: vec![trip("T1", "R1", "SVC1"), trip("T2", "R1", "SVC1")],
+            calendar: vec![],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser, "source");
@@ -647,6 +724,7 @@ mod tests {
             stops: vec![],
             stop_times: vec![],
             trips: vec![],
+            calendar: vec![],
             calendar_dates: vec![
                 GTFSCalendarDate::new(
                     GTFSServiceId::from("SVC1".to_owned()),
@@ -670,6 +748,7 @@ mod tests {
             stops: vec![],
             stop_times: vec![],
             trips: vec![],
+            calendar: vec![],
             calendar_dates: vec![
                 GTFSCalendarDate::new(
                     GTFSServiceId::from("SVC1".to_owned()),
@@ -707,6 +786,262 @@ mod tests {
         assert_eq!(dates2, vec!["20260502", "20260509"]);
     }
 
+    // ── schedules: calendar.txt (method 2) ──────────────────────────────────
+
+    fn gtfs_cal(
+        service_id: &str,
+        mon: bool,
+        tue: bool,
+        wed: bool,
+        thu: bool,
+        fri: bool,
+        sat: bool,
+        sun: bool,
+        start: &str,
+        end: &str,
+    ) -> GTFSCalendar {
+        GTFSCalendar::new(
+            GTFSServiceId::from(service_id.to_owned()),
+            mon,
+            tue,
+            wed,
+            thu,
+            fri,
+            sat,
+            sun,
+            start.to_owned(),
+            end.to_owned(),
+        )
+    }
+
+    #[test]
+    fn weekly_calendar_expands_into_explicit_dates() {
+        // 20260302 (Mon) → 20260306 (Fri): a Mon–Fri service should produce
+        // exactly five dates, one per weekday.
+        let parser = StubParser {
+            stops: vec![],
+            stop_times: vec![],
+            trips: vec![],
+            calendar: vec![gtfs_cal(
+                "SVC1", true, true, true, true, true, false, false,
+                "20260302", "20260306",
+            )],
+            calendar_dates: vec![],
+        };
+        let importer = GTFSImporter::from_parser(&parser, "source");
+        let schedules = importer.schedules();
+
+        assert_eq!(schedules.len(), 1);
+        assert_eq!(
+            schedules[0].id(),
+            &ImportedScheduleId::from("SVC1".to_owned())
+        );
+        let mut dates = schedules[0].dates().to_vec();
+        dates.sort();
+        assert_eq!(
+            dates,
+            vec!["20260302", "20260303", "20260304", "20260305", "20260306"]
+        );
+    }
+
+    #[test]
+    fn calendar_service_added_injects_an_extra_date() {
+        // Mon-only service over one week; a ServiceAdded on Wednesday should
+        // add that date even though calendar.txt does not include Wednesdays.
+        let parser = StubParser {
+            stops: vec![],
+            stop_times: vec![],
+            trips: vec![],
+            calendar: vec![gtfs_cal(
+                "SVC1", true, false, false, false, false, false, false,
+                "20260302", "20260308",
+            )],
+            calendar_dates: vec![GTFSCalendarDate::new(
+                GTFSServiceId::from("SVC1".to_owned()),
+                "20260304".to_owned(), // Wednesday
+                GTFSExceptionType::ServiceAdded,
+            )],
+        };
+        let importer = GTFSImporter::from_parser(&parser, "source");
+        let schedules = importer.schedules();
+
+        assert_eq!(schedules.len(), 1);
+        let mut dates = schedules[0].dates().to_vec();
+        dates.sort();
+        assert_eq!(dates, vec!["20260302", "20260304"]);
+    }
+
+    #[test]
+    fn calendar_service_removed_cancels_a_date() {
+        // Mon–Fri service; a ServiceRemoved on Wednesday cancels that day.
+        let parser = StubParser {
+            stops: vec![],
+            stop_times: vec![],
+            trips: vec![],
+            calendar: vec![gtfs_cal(
+                "SVC1", true, true, true, true, true, false, false,
+                "20260302", "20260306",
+            )],
+            calendar_dates: vec![GTFSCalendarDate::new(
+                GTFSServiceId::from("SVC1".to_owned()),
+                "20260304".to_owned(), // Wednesday
+                GTFSExceptionType::ServiceRemoved,
+            )],
+        };
+        let importer = GTFSImporter::from_parser(&parser, "source");
+        let schedules = importer.schedules();
+
+        assert_eq!(schedules.len(), 1);
+        let mut dates = schedules[0].dates().to_vec();
+        dates.sort();
+        assert_eq!(dates, vec!["20260302", "20260303", "20260305", "20260306"]);
+    }
+
+    #[test]
+    fn calendar_exception_only_affects_its_specific_date_not_same_weekday_in_other_weeks() {
+        // Mon–Fri service over two weeks (Mon 2 Mar → Fri 13 Mar).
+        // A ServiceRemoved for Wed 4 Mar must cancel only that date, leaving
+        // Wed 11 Mar untouched, and a ServiceAdded for Sat 7 Mar (normally
+        // outside the weekly pattern) must inject only that one Saturday.
+        let parser = StubParser {
+            stops: vec![],
+            stop_times: vec![],
+            trips: vec![],
+            calendar: vec![gtfs_cal(
+                "SVC1", true, true, true, true, true, false, false,
+                "20260302", "20260313",
+            )],
+            calendar_dates: vec![
+                GTFSCalendarDate::new(
+                    GTFSServiceId::from("SVC1".to_owned()),
+                    "20260304".to_owned(), // Wed week 1 — cancelled
+                    GTFSExceptionType::ServiceRemoved,
+                ),
+                GTFSCalendarDate::new(
+                    GTFSServiceId::from("SVC1".to_owned()),
+                    "20260307".to_owned(), // Sat week 1 — extra date
+                    GTFSExceptionType::ServiceAdded,
+                ),
+            ],
+        };
+        let importer = GTFSImporter::from_parser(&parser, "source");
+        let schedules = importer.schedules();
+
+        assert_eq!(schedules.len(), 1);
+        let mut dates = schedules[0].dates().to_vec();
+        dates.sort();
+        assert_eq!(
+            dates,
+            vec![
+                "20260302", // Mon w1
+                "20260303", // Tue w1
+                // Wed w1 (20260304) removed
+                "20260305", // Thu w1
+                "20260306", // Fri w1
+                "20260307", // Sat w1 — injected by ServiceAdded
+                "20260309", // Mon w2
+                "20260310", // Tue w2
+                "20260311", // Wed w2 — NOT affected by the w1 exception
+                "20260312", // Thu w2
+                "20260313", // Fri w2
+            ]
+        );
+    }
+
+    #[test]
+    fn calendar_date_range_does_not_need_to_be_week_aligned() {
+        // Range starts on a Wednesday and ends on a Tuesday, cutting across
+        // the Mon–Sun boundary. A Mon–Fri service must include only the days
+        // that are both in the pattern and within the range, with no phantom
+        // dates from "completing" the partial weeks at either end.
+        //   Wed 4 Mar → Tue 10 Mar:
+        //     Wed 4  ✓  Thu 5  ✓  Fri 6  ✓  (Sat/Sun excluded)
+        //     Mon 9  ✓  Tue 10 ✓
+        let parser = StubParser {
+            stops: vec![],
+            stop_times: vec![],
+            trips: vec![],
+            calendar: vec![gtfs_cal(
+                "SVC1", true, true, true, true, true, false, false,
+                "20260304", "20260310", // Wed → Tue, not Mon-aligned
+            )],
+            calendar_dates: vec![],
+        };
+        let importer = GTFSImporter::from_parser(&parser, "source");
+        let schedules = importer.schedules();
+
+        assert_eq!(schedules.len(), 1);
+        let mut dates = schedules[0].dates().to_vec();
+        dates.sort();
+        assert_eq!(
+            dates,
+            vec!["20260304", "20260305", "20260306", "20260309", "20260310"]
+        );
+    }
+
+    #[test]
+    fn calendar_all_dates_removed_produces_no_schedule() {
+        // A service whose only calendar date is cancelled should be omitted.
+        let parser = StubParser {
+            stops: vec![],
+            stop_times: vec![],
+            trips: vec![],
+            calendar: vec![gtfs_cal(
+                "SVC1", true, false, false, false, false, false, false,
+                "20260302", "20260302", // single Monday
+            )],
+            calendar_dates: vec![GTFSCalendarDate::new(
+                GTFSServiceId::from("SVC1".to_owned()),
+                "20260302".to_owned(),
+                GTFSExceptionType::ServiceRemoved,
+            )],
+        };
+        let importer = GTFSImporter::from_parser(&parser, "source");
+        assert!(importer.schedules().is_empty());
+    }
+
+    #[test]
+    fn multiple_services_from_calendar_are_independent() {
+        // Two services in calendar.txt with different weekly patterns should
+        // each produce the correct distinct set of dates.
+        let parser = StubParser {
+            stops: vec![],
+            stop_times: vec![],
+            trips: vec![],
+            calendar: vec![
+                // Weekday service
+                gtfs_cal(
+                    "WEEKDAY", true, true, true, true, true, false, false,
+                    "20260302", "20260306",
+                ),
+                // Weekend service
+                gtfs_cal(
+                    "WEEKEND", false, false, false, false, false, true, true,
+                    "20260302", "20260308",
+                ),
+            ],
+            calendar_dates: vec![],
+        };
+        let importer = GTFSImporter::from_parser(&parser, "source");
+        let mut schedules = importer.schedules().to_vec();
+        schedules.sort_by_key(|s| s.id().clone());
+
+        assert_eq!(schedules.len(), 2);
+
+        let weekday = schedules.iter().find(|s| s.id().as_str() == "WEEKDAY").unwrap();
+        let mut weekday_dates = weekday.dates().to_vec();
+        weekday_dates.sort();
+        assert_eq!(
+            weekday_dates,
+            vec!["20260302", "20260303", "20260304", "20260305", "20260306"]
+        );
+
+        let weekend = schedules.iter().find(|s| s.id().as_str() == "WEEKEND").unwrap();
+        let mut weekend_dates = weekend.dates().to_vec();
+        weekend_dates.sort();
+        assert_eq!(weekend_dates, vec!["20260307", "20260308"]);
+    }
+
     // ── stations (additional) ────────────────────────────────────────────────
 
     #[test]
@@ -715,6 +1050,7 @@ mod tests {
             stops: vec![station("S1", "Paris Nord")],
             stop_times: vec![],
             trips: vec![],
+            calendar: vec![],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser, "source");
@@ -736,6 +1072,7 @@ mod tests {
             )],
             stop_times: vec![],
             trips: vec![],
+            calendar: vec![],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser, "source");
@@ -760,6 +1097,7 @@ mod tests {
             stops: vec![station("S1", "Paris Nord"), stop("S1-A", "S1")],
             stop_times: vec![stop_time("T1", "S1-A", 0, 800, 0)],
             trips: vec![trip("T1", "R1", "SVC1")],
+            calendar: vec![],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser, "source");
@@ -781,6 +1119,7 @@ mod tests {
                 stop_time("T1", "S2-A", 1200, 0, 1),
             ],
             trips: vec![],
+            calendar: vec![],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser, "source");
@@ -803,6 +1142,7 @@ mod tests {
                 stop_time("T1", "S1-B", 900, 0, 1),
             ],
             trips: vec![trip("T1", "R1", "SVC1")],
+            calendar: vec![],
             calendar_dates: vec![],
         };
         let importer = GTFSImporter::from_parser(&parser, "source");
@@ -825,6 +1165,7 @@ mod tests {
                 stop_time("T1", "S2-A", 1200, 0, 1),
             ],
             trips: vec![trip("T1", "R1", "SVC1")],
+            calendar: vec![],
             calendar_dates: vec![GTFSCalendarDate::new(
                 GTFSServiceId::from("SVC1".to_owned()),
                 "20260601".to_owned(),

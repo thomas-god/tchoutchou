@@ -13,6 +13,9 @@ pub trait ParseGTFS {
     fn stops(&self) -> &[GTFSStop];
     fn stop_times(&self) -> &[GTFSStopTime];
     fn trips(&self) -> &[GTFSTrip];
+    /// Rows from `calendar.txt` (weekly frequency schedules). Empty when the
+    /// feed does not include a `calendar.txt` file.
+    fn calendar(&self) -> &[GTFSCalendar];
     fn calendar_dates(&self) -> &[GTFSCalendarDate];
 }
 
@@ -224,6 +227,61 @@ impl FromStr for GTFSExceptionType {
             "2" => Self::ServiceRemoved,
             _ => return Err(format!("Cannot parse {:?} into GTFSExceptionType", s)),
         })
+    }
+}
+
+/// A single row from `calendar.txt`.
+///
+/// Defines on which days of the week a service runs, and the date range over
+/// which that weekly pattern applies.
+///
+/// Spec: <https://gtfs.org/documentation/schedule/reference/#calendartxt>
+#[derive(Debug, Clone, PartialEq, Constructor)]
+pub struct GTFSCalendar {
+    service_id: GTFSServiceId,
+    monday: bool,
+    tuesday: bool,
+    wednesday: bool,
+    thursday: bool,
+    friday: bool,
+    saturday: bool,
+    sunday: bool,
+    /// Inclusive start date of the service in `YYYYMMDD` format.
+    start_date: String,
+    /// Inclusive end date of the service in `YYYYMMDD` format.
+    end_date: String,
+}
+
+impl GTFSCalendar {
+    pub fn service_id(&self) -> &GTFSServiceId {
+        &self.service_id
+    }
+    pub fn monday(&self) -> bool {
+        self.monday
+    }
+    pub fn tuesday(&self) -> bool {
+        self.tuesday
+    }
+    pub fn wednesday(&self) -> bool {
+        self.wednesday
+    }
+    pub fn thursday(&self) -> bool {
+        self.thursday
+    }
+    pub fn friday(&self) -> bool {
+        self.friday
+    }
+    pub fn saturday(&self) -> bool {
+        self.saturday
+    }
+    pub fn sunday(&self) -> bool {
+        self.sunday
+    }
+    pub fn start_date(&self) -> &str {
+        &self.start_date
+    }
+    pub fn end_date(&self) -> &str {
+        &self.end_date
     }
 }
 

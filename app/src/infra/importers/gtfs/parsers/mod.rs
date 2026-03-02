@@ -1,12 +1,13 @@
 use crate::infra::importers::gtfs::{
-    GTFSCalendarDate, GTFSStop, GTFSStopTime, GTFSTrip, ParseGTFS,
+    GTFSCalendar, GTFSCalendarDate, GTFSStop, GTFSStopTime, GTFSTrip, ParseGTFS,
 };
 
 use self::{
-    calendar_dates::CalendarDatesParser, stop_times::StopTimesParser, stops::StopsParser,
-    trips::TripsFileParser,
+    calendar::CalendarParser, calendar_dates::CalendarDatesParser, stop_times::StopTimesParser,
+    stops::StopsParser, trips::TripsFileParser,
 };
 
+pub mod calendar;
 pub mod calendar_dates;
 pub mod stop_times;
 pub mod stops;
@@ -49,6 +50,8 @@ pub struct GTFSParser {
     stops: Vec<GTFSStop>,
     stop_times: Vec<GTFSStopTime>,
     trips: Vec<GTFSTrip>,
+    /// Rows from `calendar.txt`. Empty when the feed does not include the file.
+    calendar: Vec<GTFSCalendar>,
     calendar_dates: Vec<GTFSCalendarDate>,
 }
 
@@ -61,12 +64,20 @@ impl GTFSParser {
         let stops = StopsParser::from(read("stops.txt")?).parse()?;
         let trips = TripsFileParser::from(read("trips.txt")?).parse()?;
         let calendar_dates = CalendarDatesParser::from(read("calendar_dates.txt")?).parse()?;
+        // calendar.txt is optional in GTFS: some feeds rely exclusively on
+        // calendar_dates.txt (method 1). Treat a missing file as an empty list.
+        let calendar = read("calendar.txt")
+            .ok()
+            .map(|c| CalendarParser::from(c).parse())
+            .transpose()?
+            .unwrap_or_default();
         let stop_times = StopTimesParser::from(read("stop_times.txt")?).parse()?;
 
         Ok(Self {
             stops,
             stop_times,
             trips,
+            calendar,
             calendar_dates,
         })
     }
@@ -81,6 +92,9 @@ impl ParseGTFS for GTFSParser {
     }
     fn trips(&self) -> &[GTFSTrip] {
         &self.trips
+    }
+    fn calendar(&self) -> &[GTFSCalendar] {
+        &self.calendar
     }
     fn calendar_dates(&self) -> &[GTFSCalendarDate] {
         &self.calendar_dates
