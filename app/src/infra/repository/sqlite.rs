@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, Result, Transaction, params};
 
 use crate::app::schedule::{
     ImportTrainData, ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation,
-    ImportedStationId, ImportedTripLeg, StationChange, TimetableImportResult, TrainDataRepository,
+    ImportedStationId, ImportedTripLeg, InternalStation, InternalStationId, StationChange,
+    StationMapping, TimetableImportResult, TrainDataRepository,
 };
 
 /// SQLite-backed implementation of [`TrainDataRepository`].
@@ -68,6 +69,22 @@ impl SqliteRepository {
                 route_id    TEXT NOT NULL,
                 schedule_id TEXT NOT NULL,
                 PRIMARY KEY (source, route_id, schedule_id)
+            );
+
+            -- canonical, source-agnostic stations
+            CREATE TABLE IF NOT EXISTS internal_stations (
+                id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                lat  REAL NOT NULL,
+                lon  REAL NOT NULL
+            );
+
+            -- maps every (source, source_id) pair to one internal_station
+            CREATE TABLE IF NOT EXISTS station_mappings (
+                source      TEXT    NOT NULL,
+                source_id   TEXT    NOT NULL,
+                internal_id INTEGER NOT NULL REFERENCES internal_stations(id),
+                PRIMARY KEY (source, source_id)
             );
             ",
         )
@@ -179,6 +196,46 @@ impl SqliteRepository {
         }
     }
 
+    /// Load all existing (source, source_id) pairs that already have a mapping.
+    fn load_mapped_keys(tx: &Transaction) -> HashSet<(String, String)> {
+        let mut stmt = tx
+            .prepare_cached("SELECT source, source_id FROM station_mappings")
+            .expect("load_mapped_keys: prepare failed");
+        stmt.query_map([], |row| {
+            let source: String = row.get(0)?;
+            let source_id: String = row.get(1)?;
+            Ok((source, source_id))
+        })
+        .expect("load_mapped_keys: query failed")
+        .map(|r| r.expect("load_mapped_keys: row failed"))
+        .collect()
+    }
+
+    /// Insert a new internal station derived from a source station and return its id.
+    fn insert_internal_station(tx: &Transaction, station: &ImportedStation) -> InternalStationId {
+        tx.prepare_cached("INSERT INTO internal_stations (name, lat, lon) VALUES (?1, ?2, ?3)")
+            .expect("insert_internal_station: prepare failed")
+            .execute(params![station.name(), station.lat(), station.lon()])
+            .expect("insert_internal_station: execute failed");
+        InternalStationId::from(tx.last_insert_rowid())
+    }
+
+    /// Record that `(source, source_id)` maps to `internal_id`.
+    fn insert_station_mapping(
+        tx: &Transaction,
+        source: &str,
+        source_id: &ImportedStationId,
+        internal_id: &InternalStationId,
+    ) {
+        tx.prepare_cached(
+            "INSERT INTO station_mappings (source, source_id, internal_id)
+             VALUES (?1, ?2, ?3)",
+        )
+        .expect("insert_station_mapping: prepare failed")
+        .execute(params![source, source_id.as_str(), internal_id.as_i64()])
+        .expect("insert_station_mapping: execute failed");
+    }
+
     /// Insert route–schedule mappings (table was just truncated).
     fn insert_route_schedules(
         tx: &Transaction,
@@ -210,22 +267,41 @@ impl TrainDataRepository for SqliteRepository {
         let existing = Self::load_existing_stations(&tx);
         let station_changes = Self::diff_stations(&existing, data.stations());
 
+        // Determine which source stations already have an internal mapping.
+        let mapped_keys = Self::load_mapped_keys(&tx);
+
         Self::truncate_timetable(&tx, data.source());
         Self::upsert_stations(&tx, data.stations(), data.source());
         Self::insert_schedules(&tx, data.schedules(), data.source());
         Self::insert_trips(&tx, data.trip_legs(), data.source());
         Self::insert_route_schedules(&tx, data.schedules_by_route(), data.source());
 
+        // For every source station without an existing mapping, create a fresh
+        // internal station and link it.  Existing mappings are never modified.
+        let mut new_internal_stations = Vec::new();
+        for s in data.stations() {
+            let key = (data.source().to_owned(), s.id().as_str().to_owned());
+            if !mapped_keys.contains(&key) {
+                let internal_id = Self::insert_internal_station(&tx, s);
+                Self::insert_station_mapping(&tx, data.source(), s.id(), &internal_id);
+                new_internal_stations.push(internal_id);
+            }
+        }
+
         tx.commit().expect("import_timetable: commit failed");
         println!(
-            "import_timetable: {} stations ({} changes), {} schedules, {} trips",
+            "import_timetable: {} stations ({} changes, {} new internal), {} schedules, {} trips",
             data.stations().len(),
             station_changes.len(),
+            new_internal_stations.len(),
             data.schedules().len(),
             data.trip_legs().len(),
         );
 
-        TimetableImportResult { station_changes }
+        TimetableImportResult {
+            station_changes,
+            new_internal_stations,
+        }
     }
     fn all_stations(&self) -> Vec<ImportedStation> {
         let mut stmt = self
@@ -320,6 +396,50 @@ impl TrainDataRepository for SqliteRepository {
         });
 
         map
+    }
+
+    fn internal_stations(&self) -> Vec<InternalStation> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, lat, lon FROM internal_stations")
+            .expect("internal_stations: prepare failed");
+
+        stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let name: String = row.get(1)?;
+            let lat: f64 = row.get(2)?;
+            let lon: f64 = row.get(3)?;
+            Ok(InternalStation::new(
+                InternalStationId::from(id),
+                name,
+                lat,
+                lon,
+            ))
+        })
+        .expect("internal_stations: query failed")
+        .map(|r| r.expect("internal_stations: row mapping failed"))
+        .collect()
+    }
+
+    fn station_mappings(&self) -> Vec<StationMapping> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT source, source_id, internal_id FROM station_mappings")
+            .expect("station_mappings: prepare failed");
+
+        stmt.query_map([], |row| {
+            let source: String = row.get(0)?;
+            let source_id: String = row.get(1)?;
+            let internal_id: i64 = row.get(2)?;
+            Ok(StationMapping {
+                source,
+                source_id: ImportedStationId::from(source_id),
+                internal_id: InternalStationId::from(internal_id),
+            })
+        })
+        .expect("station_mappings: query failed")
+        .map(|r| r.expect("station_mappings: row mapping failed"))
+        .collect()
     }
 }
 
@@ -703,5 +823,73 @@ mod tests {
         let mut expected = trips;
         expected.sort();
         assert_eq!(result, expected);
+    }
+
+    // ---- internal stations and station mappings ----
+
+    #[test]
+    fn import_creates_internal_station_for_new_source_station() {
+        let mut repo = make_repo();
+        let result = repo.import_timetable(&snapshot(
+            vec![station("A"), station("B")],
+            vec![],
+            vec![],
+            "db",
+        ));
+        assert_eq!(result.new_internal_stations.len(), 2);
+        assert_eq!(repo.internal_stations().len(), 2);
+        assert_eq!(repo.station_mappings().len(), 2);
+    }
+
+    #[test]
+    fn reimport_does_not_create_duplicate_internal_stations() {
+        let mut repo = make_repo();
+        repo.import_timetable(&snapshot(vec![station("A")], vec![], vec![], "db"));
+        // Second import of the same source station must not create a new internal station.
+        let result = repo.import_timetable(&snapshot(vec![station("A")], vec![], vec![], "db"));
+        assert!(result.new_internal_stations.is_empty());
+        assert_eq!(repo.internal_stations().len(), 1);
+        assert_eq!(repo.station_mappings().len(), 1);
+    }
+
+    #[test]
+    fn same_physical_station_from_two_sources_gets_two_internal_stations_by_default() {
+        let mut repo = make_repo();
+        repo.import_timetable(&snapshot(vec![station("330323")], vec![], vec![], "db"));
+        repo.import_timetable(&snapshot(
+            vec![station("StopArea:OCE87113001")],
+            vec![],
+            vec![],
+            "sncf",
+        ));
+        // Without a manual merge the two sources each get their own internal station.
+        assert_eq!(repo.internal_stations().len(), 2);
+        assert_eq!(repo.station_mappings().len(), 2);
+    }
+
+    #[test]
+    fn station_mappings_round_trip() {
+        let mut repo = make_repo();
+        repo.import_timetable(&snapshot(vec![station("A")], vec![], vec![], "db"));
+        let mappings = repo.station_mappings();
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].source, "db");
+        assert_eq!(
+            mappings[0].source_id,
+            ImportedStationId::from("A".to_owned())
+        );
+        assert_eq!(
+            mappings[0].internal_id,
+            repo.internal_stations()[0].id().clone()
+        );
+    }
+
+    #[test]
+    fn empty_import_creates_no_internal_stations() {
+        let mut repo = make_repo();
+        let result = repo.import_timetable(&snapshot(vec![], vec![], vec![], "db"));
+        assert!(result.new_internal_stations.is_empty());
+        assert!(repo.internal_stations().is_empty());
+        assert!(repo.station_mappings().is_empty());
     }
 }

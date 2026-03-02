@@ -112,6 +112,60 @@ pub trait ImportTrainData {
     fn source(&self) -> &str;
 }
 
+/// A stable, source-agnostic identifier for a physical station.  An internal
+/// station aggregates one or more raw (source) stations that represent the
+/// same physical place.
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, Ord)]
+pub struct InternalStationId(i64);
+
+impl InternalStationId {
+    pub fn as_i64(&self) -> i64 {
+        self.0
+    }
+}
+
+impl From<i64> for InternalStationId {
+    fn from(id: i64) -> Self {
+        Self(id)
+    }
+}
+
+/// Canonical representation of a physical station, independent of any
+/// particular data source.
+#[derive(Debug, Clone, PartialEq, Constructor)]
+pub struct InternalStation {
+    id: InternalStationId,
+    name: String,
+    lat: f64,
+    lon: f64,
+}
+
+impl InternalStation {
+    pub fn id(&self) -> &InternalStationId {
+        &self.id
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn lat(&self) -> f64 {
+        self.lat
+    }
+    pub fn lon(&self) -> f64 {
+        self.lon
+    }
+}
+
+/// Links a single raw (source) station to its canonical [`InternalStation`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct StationMapping {
+    /// The data source the raw station belongs to (e.g. `"db"` or `"sncf"`).
+    pub source: String,
+    /// The identifier used by that source for this station.
+    pub source_id: ImportedStationId,
+    /// The canonical internal station this source station maps to.
+    pub internal_id: InternalStationId,
+}
+
 /// Describes a change to a station detected during a timetable import.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StationChange {
@@ -126,17 +180,26 @@ pub enum StationChange {
 pub struct TimetableImportResult {
     /// Stations that are new or whose attributes changed in this import.
     pub station_changes: Vec<StationChange>,
+    /// New internal stations that were automatically created because an
+    /// incoming source station had no existing mapping.
+    pub new_internal_stations: Vec<InternalStationId>,
 }
 
 /// Persistence contract for stations, trips and schedules.
 pub trait TrainDataRepository {
     /// Atomically replace all timetable data (trips, schedules, route–schedule mappings)
     /// and upsert stations, returning information about which stations are new or changed.
+    /// For each incoming source station that has no existing mapping to an internal
+    /// station, a new [`InternalStation`] is created and linked automatically.
     fn import_timetable<D: ImportTrainData>(&mut self, data: &D) -> TimetableImportResult;
     fn all_stations(&self) -> Vec<ImportedStation>;
     fn all_schedules(&self) -> Vec<ImportedSchedule>;
     fn all_trips(&self) -> Vec<ImportedTripLeg>;
     fn schedules_by_route(&self) -> HashMap<ImportedRouteId, Vec<ImportedScheduleId>>;
+    /// Return all canonical internal stations.
+    fn internal_stations(&self) -> Vec<InternalStation>;
+    /// Return all source-to-internal station mappings.
+    fn station_mappings(&self) -> Vec<StationMapping>;
 }
 
 /// Application service that aggregates data from various importers, persists it
@@ -202,6 +265,9 @@ mod tests {
         schedules: Vec<ImportedSchedule>,
         trips: Vec<ImportedTripLeg>,
         schedules_by_route: HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
+        internal_stations: Vec<InternalStation>,
+        station_mappings: Vec<StationMapping>,
+        next_internal_id: i64,
     }
 
     impl InMemoryTestRepository {
@@ -211,6 +277,9 @@ mod tests {
                 schedules: vec![],
                 trips: vec![],
                 schedules_by_route: HashMap::new(),
+                internal_stations: vec![],
+                station_mappings: vec![],
+                next_internal_id: 1,
             }
         }
     }
@@ -245,7 +314,35 @@ mod tests {
             self.trips = data.trip_legs().to_vec();
             self.schedules_by_route = data.schedules_by_route().clone();
 
-            TimetableImportResult { station_changes }
+            // Auto-create internal stations for unmapped source stations.
+            let mut new_internal_stations = Vec::new();
+            for s in data.stations() {
+                let already_mapped = self
+                    .station_mappings
+                    .iter()
+                    .any(|m| m.source == data.source() && &m.source_id == s.id());
+                if !already_mapped {
+                    let internal_id = InternalStationId::from(self.next_internal_id);
+                    self.next_internal_id += 1;
+                    self.internal_stations.push(InternalStation::new(
+                        internal_id.clone(),
+                        s.name().to_owned(),
+                        s.lat(),
+                        s.lon(),
+                    ));
+                    self.station_mappings.push(StationMapping {
+                        source: data.source().to_owned(),
+                        source_id: s.id().clone(),
+                        internal_id: internal_id.clone(),
+                    });
+                    new_internal_stations.push(internal_id);
+                }
+            }
+
+            TimetableImportResult {
+                station_changes,
+                new_internal_stations,
+            }
         }
 
         fn all_stations(&self) -> Vec<ImportedStation> {
@@ -259,6 +356,12 @@ mod tests {
         }
         fn schedules_by_route(&self) -> HashMap<ImportedRouteId, Vec<ImportedScheduleId>> {
             self.schedules_by_route.clone()
+        }
+        fn internal_stations(&self) -> Vec<InternalStation> {
+            self.internal_stations.clone()
+        }
+        fn station_mappings(&self) -> Vec<StationMapping> {
+            self.station_mappings.clone()
         }
     }
 
