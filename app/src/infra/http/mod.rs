@@ -10,9 +10,19 @@ use axum::{
 use tokio::net;
 use tower_http::cors::CorsLayer;
 
-use crate::infra::{config::Config, http::handlers::autocomplete_station};
+use crate::{
+    app::schedule::ScheduleService,
+    infra::{
+        config::Config, http::handlers::autocomplete_station, repository::sqlite::SqliteRepository,
+    },
+};
 
 mod handlers;
+
+#[derive(Clone)]
+pub struct AppState {
+    schedule: ScheduleService<SqliteRepository>,
+}
 
 pub struct HttpServer {
     router: axum::Router,
@@ -20,7 +30,10 @@ pub struct HttpServer {
 }
 
 impl HttpServer {
-    pub async fn new(config: Config) -> anyhow::Result<Self> {
+    pub async fn new(
+        config: Config,
+        schedule_service: ScheduleService<SqliteRepository>,
+    ) -> anyhow::Result<Self> {
         let trace_layer = tower_http::trace::TraceLayer::new_for_http().make_span_with(
             |request: &axum::extract::Request<_>| {
                 let uri = request.uri().to_string();
@@ -28,7 +41,9 @@ impl HttpServer {
             },
         );
 
-        // let state = AppState {};
+        let state = AppState {
+            schedule: schedule_service,
+        };
 
         let origin = config
             .allow_origin
@@ -45,17 +60,13 @@ impl HttpServer {
                 .allow_credentials(true),
         );
 
-        // let router = router.with_state(state);
+        let router = router.with_state(state);
 
         let listener = net::TcpListener::bind(format!("0.0.0.0:{}", config.server_port))
             .await
             .with_context(|| format!("failed to listen on {}", config.server_port))?;
 
-        Ok(Self {
-            router,
-            listener,
-            // _marker_repository: PhantomData,
-        })
+        Ok(Self { router, listener })
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
@@ -67,6 +78,6 @@ impl HttpServer {
     }
 }
 
-fn routes() -> Router {
+fn routes() -> Router<AppState> {
     Router::new().route("/stations/autocomplete", get(autocomplete_station))
 }

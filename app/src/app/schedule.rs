@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use derive_more::{Constructor, From};
 
@@ -248,18 +251,31 @@ pub trait TrainDataRepository {
 /// through a [`StationAndTripRepository`], and exposes a [`Graph`] ready for the
 /// optimisation algorithms in [`crate::domain::optim`].
 pub struct ScheduleService<R: TrainDataRepository> {
-    repository: R,
+    repository: Arc<Mutex<R>>,
+}
+
+impl<R: TrainDataRepository> Clone for ScheduleService<R> {
+    fn clone(&self) -> Self {
+        Self {
+            repository: self.repository.clone(),
+        }
+    }
 }
 
 impl<R: TrainDataRepository> ScheduleService<R> {
     pub fn new(repository: R) -> Self {
-        Self { repository }
+        Self {
+            repository: Arc::new(Mutex::new(repository)),
+        }
     }
 
     /// Feed stations, schedules and trips from any importer into the repository.
     /// Returns a [`TimetableImportResult`] describing which stations are new or changed.
     pub fn ingest(&mut self, data: TrainDataToImport) -> TimetableImportResult {
-        self.repository.import_timetable(data)
+        self.repository
+            .lock()
+            .map(|mut repo| repo.import_timetable(data))
+            .unwrap()
     }
 
     /// Reassign a source station to a different internal station.
@@ -275,20 +291,25 @@ impl<R: TrainDataRepository> ScheduleService<R> {
         new_internal_id: &InternalStationId,
     ) -> Result<(), RemapError> {
         self.repository
-            .remap_station(source, source_id, new_internal_id)
+            .lock()
+            .map(|mut repo| repo.remap_station(source, source_id, new_internal_id))
+            .unwrap()
     }
 
     /// Return up to `limit` internal stations whose name contains `query`
     /// (case-insensitive), ordered alphabetically.  Intended for autocomplete.
     pub fn search_stations_by_name(&self, query: &str, limit: usize) -> Vec<InternalStation> {
         self.repository
-            .search_internal_stations_by_name(query, limit)
+            .lock()
+            .map(|repo| repo.search_internal_stations_by_name(query, limit))
+            .unwrap()
     }
 
     /// Build a [`Graph`] from everything currently held by the repository.
     pub fn graph(&self) -> Graph {
-        let stations = self.repository.all_stations();
-        let trips = self.repository.all_trips();
+        let repo = self.repository.lock().unwrap();
+        let stations = repo.all_stations();
+        let trips = repo.all_trips();
         build_graph(&stations, &trips)
     }
 }
