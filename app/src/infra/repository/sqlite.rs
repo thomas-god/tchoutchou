@@ -421,6 +421,35 @@ impl TrainDataRepository for SqliteRepository {
         .collect()
     }
 
+    fn search_internal_stations_by_name(&self, query: &str, limit: usize) -> Vec<InternalStation> {
+        let pattern = format!("%{}%", query);
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, name, lat, lon FROM internal_stations
+                 WHERE LOWER(name) LIKE LOWER(?1)
+                 ORDER BY name
+                 LIMIT ?2",
+            )
+            .expect("search_internal_stations_by_name: prepare failed");
+
+        stmt.query_map(params![pattern, limit as i64], |row| {
+            let id: i64 = row.get(0)?;
+            let name: String = row.get(1)?;
+            let lat: f64 = row.get(2)?;
+            let lon: f64 = row.get(3)?;
+            Ok(InternalStation::new(
+                InternalStationId::from(id),
+                name,
+                lat,
+                lon,
+            ))
+        })
+        .expect("search_internal_stations_by_name: query failed")
+        .map(|r| r.expect("search_internal_stations_by_name: row mapping failed"))
+        .collect()
+    }
+
     fn station_mappings(&self) -> Vec<StationMapping> {
         let mut stmt = self
             .conn
@@ -1040,5 +1069,101 @@ mod tests {
 
         let err = repo.remap_station("db", &source_id, &ghost_id).unwrap_err();
         assert_eq!(err, RemapError::InternalStationNotFound);
+    }
+
+    // ---- search_internal_stations_by_name ----
+
+    fn named_station(id: &str, name: &str) -> ImportedStation {
+        ImportedStation::new(
+            ImportedStationId::from(id.to_owned()),
+            name.to_owned(),
+            1.0,
+            2.0,
+        )
+    }
+
+    fn import_named(repo: &mut SqliteRepository, id: &str, name: &str, source: &str) {
+        repo.import_timetable(data_to_import(
+            vec![named_station(id, name)],
+            vec![],
+            vec![],
+            source,
+        ));
+    }
+
+    #[test]
+    fn search_returns_matching_stations() {
+        let mut repo = make_repo();
+        import_named(&mut repo, "1", "Paris Gare de Lyon", "sncf");
+        import_named(&mut repo, "2", "Paris Nord", "sncf");
+        import_named(&mut repo, "3", "Lyon Part-Dieu", "sncf");
+
+        let results = repo.search_internal_stations_by_name("paris", 10);
+        let names: Vec<_> = results.iter().map(|s| s.name()).collect();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"Paris Gare de Lyon"));
+        assert!(names.contains(&"Paris Nord"));
+    }
+
+    #[test]
+    fn search_is_case_insensitive() {
+        let mut repo = make_repo();
+        import_named(&mut repo, "1", "Bordeaux Saint-Jean", "sncf");
+
+        assert_eq!(
+            repo.search_internal_stations_by_name("BORDEAUX", 10).len(),
+            1
+        );
+        assert_eq!(
+            repo.search_internal_stations_by_name("bordeaux", 10).len(),
+            1
+        );
+        assert_eq!(
+            repo.search_internal_stations_by_name("Bordeaux", 10).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn search_returns_empty_when_no_match() {
+        let mut repo = make_repo();
+        import_named(&mut repo, "1", "Marseille Saint-Charles", "sncf");
+
+        assert!(
+            repo.search_internal_stations_by_name("Berlin", 10)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn search_respects_limit() {
+        let mut repo = make_repo();
+        import_named(&mut repo, "1", "Gare A", "sncf");
+        import_named(&mut repo, "2", "Gare B", "sncf");
+        import_named(&mut repo, "3", "Gare C", "sncf");
+
+        let results = repo.search_internal_stations_by_name("Gare", 2);
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn search_results_are_ordered_alphabetically() {
+        let mut repo = make_repo();
+        import_named(&mut repo, "1", "Toulouse Matabiau", "sncf");
+        import_named(&mut repo, "2", "Tours", "sncf");
+        import_named(&mut repo, "3", "Toulon", "sncf");
+
+        let results = repo.search_internal_stations_by_name("to", 10);
+        let names: Vec<_> = results.iter().map(|s| s.name()).collect();
+        assert_eq!(names, ["Toulon", "Toulouse Matabiau", "Tours"]);
+    }
+
+    #[test]
+    fn search_on_empty_repository_returns_empty() {
+        let repo = make_repo();
+        assert!(
+            repo.search_internal_stations_by_name("Paris", 10)
+                .is_empty()
+        );
     }
 }

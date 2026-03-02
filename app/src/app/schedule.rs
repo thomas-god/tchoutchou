@@ -239,6 +239,9 @@ pub trait TrainDataRepository {
         source_id: &ImportedStationId,
         new_internal_id: &InternalStationId,
     ) -> Result<(), RemapError>;
+    /// Return up to `limit` internal stations whose name contains `query`
+    /// (case-insensitive), ordered alphabetically.  Intended for autocomplete.
+    fn search_internal_stations_by_name(&self, query: &str, limit: usize) -> Vec<InternalStation>;
 }
 
 /// Application service that aggregates data from various importers, persists it
@@ -273,6 +276,13 @@ impl<R: TrainDataRepository> ScheduleService<R> {
     ) -> Result<(), RemapError> {
         self.repository
             .remap_station(source, source_id, new_internal_id)
+    }
+
+    /// Return up to `limit` internal stations whose name contains `query`
+    /// (case-insensitive), ordered alphabetically.  Intended for autocomplete.
+    pub fn search_stations_by_name(&self, query: &str, limit: usize) -> Vec<InternalStation> {
+        self.repository
+            .search_internal_stations_by_name(query, limit)
     }
 
     /// Build a [`Graph`] from everything currently held by the repository.
@@ -344,6 +354,7 @@ pub mod test_utils {
                 source_id: &ImportedStationId,
                 new_internal_id: &InternalStationId,
             ) -> Result<(), RemapError>;
+            fn search_internal_stations_by_name(&self, query: &str, limit: usize) -> Vec<InternalStation>;
         }
     }
 }
@@ -553,5 +564,29 @@ mod tests {
             service.remap_station("db", &src, &ghost_internal),
             Err(RemapError::InternalStationNotFound)
         );
+    }
+
+    // ---- search_stations_by_name ----
+
+    fn internal_station(id: i64, name: &str) -> InternalStation {
+        InternalStation::new(InternalStationId::from(id), name.to_owned(), 0.0, 0.0)
+    }
+
+    #[test]
+    fn search_stations_by_name_delegates_to_repository() {
+        let expected = vec![
+            internal_station(1, "Paris Gare de Lyon"),
+            internal_station(2, "Paris Nord"),
+        ];
+        let expected_clone = expected.clone();
+
+        let mut mock = MockTrainDataRepository::new();
+        mock.expect_search_internal_stations_by_name()
+            .withf(|q, lim| q == "paris" && *lim == 10)
+            .times(1)
+            .return_once(move |_, _| expected_clone);
+
+        let service = ScheduleService::new(mock);
+        assert_eq!(service.search_stations_by_name("paris", 10), expected);
     }
 }
