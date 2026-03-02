@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{Connection, Result, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Result, Transaction, params};
 
 use crate::app::schedule::{
     ImportTrainData, ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation,
-    ImportedStationId, ImportedTripLeg, InternalStation, InternalStationId, StationChange,
-    StationMapping, TimetableImportResult, TrainDataRepository,
+    ImportedStationId, ImportedTripLeg, InternalStation, InternalStationId, RemapError,
+    StationChange, StationMapping, TimetableImportResult, TrainDataRepository,
 };
 
 /// SQLite-backed implementation of [`TrainDataRepository`].
@@ -440,6 +440,83 @@ impl TrainDataRepository for SqliteRepository {
         .expect("station_mappings: query failed")
         .map(|r| r.expect("station_mappings: row mapping failed"))
         .collect()
+    }
+
+    fn remap_station(
+        &mut self,
+        source: &str,
+        source_id: &ImportedStationId,
+        new_internal_id: &InternalStationId,
+    ) -> Result<(), RemapError> {
+        let tx = self
+            .conn
+            .transaction()
+            .expect("remap_station: begin transaction failed");
+
+        // Verify the target internal station exists.
+        let exists: bool = tx
+            .query_row(
+                "SELECT COUNT(*) FROM internal_stations WHERE id = ?1",
+                params![new_internal_id.as_i64()],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("remap_station: existence check failed")
+            > 0;
+
+        if !exists {
+            return Err(RemapError::InternalStationNotFound);
+        }
+
+        // Fetch the current internal_id (and confirm the mapping exists).
+        let old_internal_id: Option<i64> = tx
+            .query_row(
+                "SELECT internal_id FROM station_mappings
+                 WHERE source = ?1 AND source_id = ?2",
+                params![source, source_id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()
+            .expect("remap_station: old id fetch failed");
+
+        let old_internal_id = match old_internal_id {
+            Some(id) => id,
+            None => return Err(RemapError::MappingNotFound),
+        };
+
+        // Update the mapping.
+        tx.prepare_cached(
+            "UPDATE station_mappings
+             SET internal_id = ?3
+             WHERE source = ?1 AND source_id = ?2",
+        )
+        .expect("remap_station: prepare failed")
+        .execute(params![
+            source,
+            source_id.as_str(),
+            new_internal_id.as_i64()
+        ])
+        .expect("remap_station: execute failed");
+
+        // Delete the old internal station if it is now unreferenced.
+        if old_internal_id != new_internal_id.as_i64() {
+            let still_referenced: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM station_mappings WHERE internal_id = ?1",
+                    params![old_internal_id],
+                    |row| row.get(0),
+                )
+                .expect("remap_station: reference count failed");
+
+            if still_referenced == 0 {
+                tx.prepare_cached("DELETE FROM internal_stations WHERE id = ?1")
+                    .expect("remap_station: delete prepare failed")
+                    .execute(params![old_internal_id])
+                    .expect("remap_station: delete execute failed");
+            }
+        }
+
+        tx.commit().expect("remap_station: commit failed");
+        Ok(())
     }
 }
 
@@ -891,5 +968,107 @@ mod tests {
         assert!(result.new_internal_stations.is_empty());
         assert!(repo.internal_stations().is_empty());
         assert!(repo.station_mappings().is_empty());
+    }
+
+    // ---- remap_station ----
+
+    #[test]
+    fn remap_station_updates_mapping() {
+        let mut repo = make_repo();
+        // Import two sources; each gets its own internal station.
+        repo.import_timetable(&snapshot(vec![station("330323")], vec![], vec![], "db"));
+        repo.import_timetable(&snapshot(
+            vec![station("StopArea:OCE87113001")],
+            vec![],
+            vec![],
+            "sncf",
+        ));
+
+        let mappings = repo.station_mappings();
+        let db_internal = mappings
+            .iter()
+            .find(|m| m.source == "db")
+            .unwrap()
+            .internal_id
+            .clone();
+        let sncf_source_id = ImportedStationId::from("StopArea:OCE87113001".to_owned());
+
+        // Merge: point the sncf station at the db internal station.
+        repo.remap_station("sncf", &sncf_source_id, &db_internal)
+            .expect("remap should succeed");
+
+        let updated = repo.station_mappings();
+        let sncf_mapping = updated.iter().find(|m| m.source == "sncf").unwrap();
+        assert_eq!(sncf_mapping.internal_id, db_internal);
+        // The sncf-only internal station is now orphaned and must be deleted.
+        assert_eq!(repo.internal_stations().len(), 1);
+    }
+
+    #[test]
+    fn remap_station_keeps_internal_station_when_still_referenced() {
+        let mut repo = make_repo();
+        repo.import_timetable(&snapshot(vec![station("A")], vec![], vec![], "db"));
+        repo.import_timetable(&snapshot(vec![station("X")], vec![], vec![], "sncf"));
+        repo.import_timetable(&snapshot(vec![station("Y")], vec![], vec![], "fr"));
+
+        let mappings = repo.station_mappings();
+        let sncf_internal = mappings
+            .iter()
+            .find(|m| m.source == "sncf")
+            .unwrap()
+            .internal_id
+            .clone();
+        let db_internal = mappings
+            .iter()
+            .find(|m| m.source == "db")
+            .unwrap()
+            .internal_id
+            .clone();
+
+        // Point fr/Y at sncf's internal station (orphans fr's own → deleted).
+        repo.remap_station(
+            "fr",
+            &ImportedStationId::from("Y".to_owned()),
+            &sncf_internal,
+        )
+        .expect("first remap");
+        assert_eq!(repo.internal_stations().len(), 2);
+
+        // Now remap sncf/X → db's internal station.
+        // sncf_internal is still referenced by fr/Y, so it must NOT be deleted.
+        repo.remap_station(
+            "sncf",
+            &ImportedStationId::from("X".to_owned()),
+            &db_internal,
+        )
+        .expect("second remap");
+        assert_eq!(repo.internal_stations().len(), 2);
+    }
+
+    #[test]
+    fn remap_station_returns_error_for_unknown_mapping() {
+        let mut repo = make_repo();
+        repo.import_timetable(&snapshot(vec![station("A")], vec![], vec![], "db"));
+
+        let internal_ids = repo.internal_stations();
+        let valid_id = internal_ids[0].id().clone();
+        let unknown_source_id = ImportedStationId::from("nonexistent".to_owned());
+
+        let err = repo
+            .remap_station("db", &unknown_source_id, &valid_id)
+            .unwrap_err();
+        assert_eq!(err, RemapError::MappingNotFound);
+    }
+
+    #[test]
+    fn remap_station_returns_error_for_unknown_internal_station() {
+        let mut repo = make_repo();
+        repo.import_timetable(&snapshot(vec![station("A")], vec![], vec![], "db"));
+
+        let source_id = ImportedStationId::from("A".to_owned());
+        let ghost_id = InternalStationId::from(99999_i64);
+
+        let err = repo.remap_station("db", &source_id, &ghost_id).unwrap_err();
+        assert_eq!(err, RemapError::InternalStationNotFound);
     }
 }

@@ -185,6 +185,15 @@ pub struct TimetableImportResult {
     pub new_internal_stations: Vec<InternalStationId>,
 }
 
+/// Errors that can be returned by [`TrainDataRepository::remap_station`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum RemapError {
+    /// No mapping exists for the given `(source, source_id)` pair.
+    MappingNotFound,
+    /// The target [`InternalStationId`] does not exist in the repository.
+    InternalStationNotFound,
+}
+
 /// Persistence contract for stations, trips and schedules.
 pub trait TrainDataRepository {
     /// Atomically replace all timetable data (trips, schedules, route–schedule mappings)
@@ -200,6 +209,17 @@ pub trait TrainDataRepository {
     fn internal_stations(&self) -> Vec<InternalStation>;
     /// Return all source-to-internal station mappings.
     fn station_mappings(&self) -> Vec<StationMapping>;
+    /// Reassign an existing source station mapping to a different internal station.
+    ///
+    /// Returns [`RemapError::MappingNotFound`] when no mapping exists for
+    /// `(source, source_id)`, and [`RemapError::InternalStationNotFound`] when
+    /// `new_internal_id` does not refer to a known internal station.
+    fn remap_station(
+        &mut self,
+        source: &str,
+        source_id: &ImportedStationId,
+        new_internal_id: &InternalStationId,
+    ) -> Result<(), RemapError>;
 }
 
 /// Application service that aggregates data from various importers, persists it
@@ -218,6 +238,22 @@ impl<R: TrainDataRepository> ScheduleService<R> {
     /// Returns a [`TimetableImportResult`] describing which stations are new or changed.
     pub fn ingest(&mut self, importer: &impl ImportTrainData) -> TimetableImportResult {
         self.repository.import_timetable(importer)
+    }
+
+    /// Reassign a source station to a different internal station.
+    ///
+    /// This is the primary way to merge duplicate stations across sources: after
+    /// both have been imported (each with an auto-created internal station), call
+    /// this to point one of the source stations at the other's internal station.
+    /// The now-orphaned internal station can be cleaned up separately if needed.
+    pub fn remap_station(
+        &mut self,
+        source: &str,
+        source_id: &ImportedStationId,
+        new_internal_id: &InternalStationId,
+    ) -> Result<(), RemapError> {
+        self.repository
+            .remap_station(source, source_id, new_internal_id)
     }
 
     /// Build a [`Graph`] from everything currently held by the repository.
@@ -362,6 +398,47 @@ mod tests {
         }
         fn station_mappings(&self) -> Vec<StationMapping> {
             self.station_mappings.clone()
+        }
+
+        fn remap_station(
+            &mut self,
+            source: &str,
+            source_id: &ImportedStationId,
+            new_internal_id: &InternalStationId,
+        ) -> Result<(), RemapError> {
+            if !self
+                .internal_stations
+                .iter()
+                .any(|s| s.id() == new_internal_id)
+            {
+                return Err(RemapError::InternalStationNotFound);
+            }
+
+            // Update the mapping and capture the old internal_id.
+            let old_internal_id = {
+                let mapping = self
+                    .station_mappings
+                    .iter_mut()
+                    .find(|m| m.source == source && &m.source_id == source_id)
+                    .ok_or(RemapError::MappingNotFound)?;
+                let old = mapping.internal_id.clone();
+                mapping.internal_id = new_internal_id.clone();
+                old
+            };
+
+            // Delete the old internal station if it is now unreferenced.
+            if old_internal_id != *new_internal_id {
+                let still_referenced = self
+                    .station_mappings
+                    .iter()
+                    .any(|m| m.internal_id == old_internal_id);
+                if !still_referenced {
+                    self.internal_stations
+                        .retain(|s| s.id() != &old_internal_id);
+                }
+            }
+
+            Ok(())
         }
     }
 
@@ -539,5 +616,114 @@ mod tests {
 
         let graph = service.graph();
         assert_eq!(graph.trips_from(StationId::from(0)).len(), 3);
+    }
+
+    // ---- remap_station ----
+
+    fn make_importer(source: &str, station_ids: &[&str]) -> TestImporter {
+        TestImporter::new(
+            station_ids.iter().map(|id| station(id)).collect(),
+            vec![],
+            vec![],
+            HashMap::new(),
+            source.to_owned(),
+        )
+    }
+
+    #[test]
+    fn remap_station_reassigns_mapping() {
+        let mut service = ScheduleService::new(InMemoryTestRepository::empty());
+        service.ingest(&make_importer("db", &["330323"]));
+        service.ingest(&make_importer("sncf", &["StopArea:OCE87113001"]));
+
+        let mappings = service.repository.station_mappings();
+        let db_internal = mappings
+            .iter()
+            .find(|m| m.source == "db")
+            .unwrap()
+            .internal_id
+            .clone();
+        let sncf_src = ImportedStationId::from("StopArea:OCE87113001".to_owned());
+
+        service
+            .remap_station("sncf", &sncf_src, &db_internal)
+            .expect("remap should succeed");
+
+        let updated = service.repository.station_mappings();
+        let sncf_mapping = updated.iter().find(|m| m.source == "sncf").unwrap();
+        assert_eq!(sncf_mapping.internal_id, db_internal);
+        // The sncf-only internal station is now orphaned and must be deleted.
+        assert_eq!(service.repository.internal_stations().len(), 1);
+    }
+
+    #[test]
+    fn remap_station_keeps_internal_station_when_still_referenced() {
+        let mut service = ScheduleService::new(InMemoryTestRepository::empty());
+        service.ingest(&make_importer("db", &["A"]));
+        service.ingest(&make_importer("sncf", &["X"]));
+        service.ingest(&make_importer("fr", &["Y"]));
+
+        let mappings = service.repository.station_mappings();
+        let sncf_internal = mappings
+            .iter()
+            .find(|m| m.source == "sncf")
+            .unwrap()
+            .internal_id
+            .clone();
+        let db_internal = mappings
+            .iter()
+            .find(|m| m.source == "db")
+            .unwrap()
+            .internal_id
+            .clone();
+
+        // Point fr/Y at sncf's internal station (orphans fr's own → deleted).
+        service
+            .remap_station(
+                "fr",
+                &ImportedStationId::from("Y".to_owned()),
+                &sncf_internal,
+            )
+            .expect("first remap");
+        assert_eq!(service.repository.internal_stations().len(), 2);
+
+        // Now remap sncf/X → db's internal station.
+        // sncf_internal is still referenced by fr/Y, so it must NOT be deleted.
+        service
+            .remap_station(
+                "sncf",
+                &ImportedStationId::from("X".to_owned()),
+                &db_internal,
+            )
+            .expect("second remap");
+        assert_eq!(service.repository.internal_stations().len(), 2);
+    }
+
+    #[test]
+    fn remap_station_error_on_unknown_mapping() {
+        let mut service = ScheduleService::new(InMemoryTestRepository::empty());
+        service.ingest(&make_importer("db", &["A"]));
+
+        let internal_id = service.repository.station_mappings()[0].internal_id.clone();
+        let ghost_src = ImportedStationId::from("ghost".to_owned());
+
+        assert_eq!(
+            service.remap_station("db", &ghost_src, &internal_id),
+            Err(RemapError::MappingNotFound)
+        );
+    }
+
+    #[test]
+    fn remap_station_error_on_unknown_internal_station() {
+        let mut service = ScheduleService::new(InMemoryTestRepository::empty());
+        service.ingest(&make_importer("db", &["A"]));
+
+        let src = ImportedStationId::from("A".to_owned());
+        let ghost_internal = InternalStationId::from(99999_i64);
+
+        assert_eq!(
+            service.remap_station("db", &src, &ghost_internal),
+            Err(RemapError::InternalStationNotFound)
+        );
     }
 }
