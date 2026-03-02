@@ -10,4 +10,5 @@ derive_more = { version = "2.1.1", features = ["full"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dev-dependencies]
+mockall = "0.13"
 pretty_assertions = "1.4.1"

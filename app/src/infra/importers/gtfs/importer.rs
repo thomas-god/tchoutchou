@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use derive_more::{Constructor, From};
 
 use crate::app::schedule::{
-    ImportTrainData, ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation,
-    ImportedStationId, ImportedTripLeg,
+    ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation, ImportedStationId,
+    ImportedTripLeg, TrainDataToImport,
 };
 
 use super::{
@@ -104,27 +104,15 @@ impl GTFSImporter {
             source: source.to_owned(),
         }
     }
-}
 
-impl ImportTrainData for GTFSImporter {
-    fn stations(&self) -> &[ImportedStation] {
-        &self.stations
-    }
-
-    fn trip_legs(&self) -> &[ImportedTripLeg] {
-        &self.trips
-    }
-
-    fn schedules(&self) -> &[ImportedSchedule] {
-        &self.schedules
-    }
-
-    fn schedules_by_route(&self) -> &HashMap<ImportedRouteId, Vec<ImportedScheduleId>> {
-        &self.schedules_by_route
-    }
-
-    fn source(&self) -> &str {
-        &self.source
+    pub fn as_data(self) -> TrainDataToImport {
+        TrainDataToImport::new(
+            self.stations,
+            self.trips,
+            self.schedules,
+            self.schedules_by_route,
+            self.source,
+        )
     }
 }
 
@@ -247,9 +235,7 @@ fn build_imported_schedules(
             (Weekday::Sun, cal.sunday()),
         ];
 
-        let dates = by_service
-            .entry(cal.service_id().clone())
-            .or_default();
+        let dates = by_service.entry(cal.service_id().clone()).or_default();
         let mut current = start;
         while current <= end {
             if enabled
@@ -358,7 +344,6 @@ fn reconcile_trips(stations: &[GTFSStation], trips: &[GTFSTripLeg]) -> Vec<Impor
 
 #[cfg(test)]
 mod tests {
-    use crate::app::schedule::ImportTrainData;
 
     use super::*;
 
@@ -459,8 +444,8 @@ mod tests {
             calendar: vec![],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let mut result = importer.stations().to_vec();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let mut result = data.stations().to_vec();
         result.sort_by_key(|s| s.id().clone());
 
         assert_eq!(result.len(), 2);
@@ -503,8 +488,8 @@ mod tests {
             calendar: vec![],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let result = importer.stations();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let result = data.stations();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id(), &ImportedStationId::from("S1".to_owned()));
     }
@@ -529,8 +514,8 @@ mod tests {
             calendar: vec![],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let result = importer.trip_legs();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let result = data.trip_legs();
 
         assert_eq!(result.len(), 1);
         assert_eq!(
@@ -557,8 +542,8 @@ mod tests {
             calendar: vec![],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        assert!(importer.trip_legs().is_empty());
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        assert!(data.trip_legs().is_empty());
     }
 
     #[test]
@@ -582,8 +567,8 @@ mod tests {
             calendar: vec![],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let mut result = importer.trip_legs().to_vec();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let mut result = data.trip_legs().to_vec();
         result.sort();
 
         let expected_origin = ImportedStationId::from("S1".to_owned());
@@ -614,8 +599,8 @@ mod tests {
             calendar: vec![],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let mut result = importer.trip_legs().to_vec();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let mut result = data.trip_legs().to_vec();
         result.sort();
 
         assert_eq!(result.len(), 3);
@@ -652,8 +637,8 @@ mod tests {
                 ),
             ],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let schedules = importer.schedules();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let schedules = data.schedules();
 
         assert_eq!(schedules.len(), 1);
         assert_eq!(
@@ -678,8 +663,8 @@ mod tests {
             calendar: vec![],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let by_route = importer.schedules_by_route();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let by_route = data.schedules_by_route();
 
         let r1 = ImportedRouteId::from("R1".to_owned());
         let r2 = ImportedRouteId::from("R2".to_owned());
@@ -708,8 +693,8 @@ mod tests {
             calendar: vec![],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let by_route = importer.schedules_by_route();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let by_route = data.schedules_by_route();
 
         let r1 = ImportedRouteId::from("R1".to_owned());
         assert_eq!(
@@ -738,8 +723,8 @@ mod tests {
                 ),
             ],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        assert!(importer.schedules().is_empty());
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        assert!(data.schedules().is_empty());
     }
 
     #[test]
@@ -767,8 +752,8 @@ mod tests {
                 ),
             ],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let mut schedules = importer.schedules().to_vec();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let mut schedules = data.schedules().to_vec();
         schedules.sort_by_key(|s| s.id().clone());
 
         assert_eq!(schedules.len(), 2);
@@ -823,13 +808,12 @@ mod tests {
             stop_times: vec![],
             trips: vec![],
             calendar: vec![gtfs_cal(
-                "SVC1", true, true, true, true, true, false, false,
-                "20260302", "20260306",
+                "SVC1", true, true, true, true, true, false, false, "20260302", "20260306",
             )],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let schedules = importer.schedules();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let schedules = data.schedules();
 
         assert_eq!(schedules.len(), 1);
         assert_eq!(
@@ -853,8 +837,7 @@ mod tests {
             stop_times: vec![],
             trips: vec![],
             calendar: vec![gtfs_cal(
-                "SVC1", true, false, false, false, false, false, false,
-                "20260302", "20260308",
+                "SVC1", true, false, false, false, false, false, false, "20260302", "20260308",
             )],
             calendar_dates: vec![GTFSCalendarDate::new(
                 GTFSServiceId::from("SVC1".to_owned()),
@@ -862,8 +845,8 @@ mod tests {
                 GTFSExceptionType::ServiceAdded,
             )],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let schedules = importer.schedules();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let schedules = data.schedules();
 
         assert_eq!(schedules.len(), 1);
         let mut dates = schedules[0].dates().to_vec();
@@ -879,8 +862,7 @@ mod tests {
             stop_times: vec![],
             trips: vec![],
             calendar: vec![gtfs_cal(
-                "SVC1", true, true, true, true, true, false, false,
-                "20260302", "20260306",
+                "SVC1", true, true, true, true, true, false, false, "20260302", "20260306",
             )],
             calendar_dates: vec![GTFSCalendarDate::new(
                 GTFSServiceId::from("SVC1".to_owned()),
@@ -888,8 +870,8 @@ mod tests {
                 GTFSExceptionType::ServiceRemoved,
             )],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let schedules = importer.schedules();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let schedules = data.schedules();
 
         assert_eq!(schedules.len(), 1);
         let mut dates = schedules[0].dates().to_vec();
@@ -908,8 +890,7 @@ mod tests {
             stop_times: vec![],
             trips: vec![],
             calendar: vec![gtfs_cal(
-                "SVC1", true, true, true, true, true, false, false,
-                "20260302", "20260313",
+                "SVC1", true, true, true, true, true, false, false, "20260302", "20260313",
             )],
             calendar_dates: vec![
                 GTFSCalendarDate::new(
@@ -924,8 +905,8 @@ mod tests {
                 ),
             ],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let schedules = importer.schedules();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let schedules = data.schedules();
 
         assert_eq!(schedules.len(), 1);
         let mut dates = schedules[0].dates().to_vec();
@@ -962,13 +943,13 @@ mod tests {
             stop_times: vec![],
             trips: vec![],
             calendar: vec![gtfs_cal(
-                "SVC1", true, true, true, true, true, false, false,
-                "20260304", "20260310", // Wed → Tue, not Mon-aligned
+                "SVC1", true, true, true, true, true, false, false, "20260304",
+                "20260310", // Wed → Tue, not Mon-aligned
             )],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let schedules = importer.schedules();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let schedules = data.schedules();
 
         assert_eq!(schedules.len(), 1);
         let mut dates = schedules[0].dates().to_vec();
@@ -987,8 +968,8 @@ mod tests {
             stop_times: vec![],
             trips: vec![],
             calendar: vec![gtfs_cal(
-                "SVC1", true, false, false, false, false, false, false,
-                "20260302", "20260302", // single Monday
+                "SVC1", true, false, false, false, false, false, false, "20260302",
+                "20260302", // single Monday
             )],
             calendar_dates: vec![GTFSCalendarDate::new(
                 GTFSServiceId::from("SVC1".to_owned()),
@@ -996,8 +977,8 @@ mod tests {
                 GTFSExceptionType::ServiceRemoved,
             )],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        assert!(importer.schedules().is_empty());
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        assert!(data.schedules().is_empty());
     }
 
     #[test]
@@ -1011,24 +992,26 @@ mod tests {
             calendar: vec![
                 // Weekday service
                 gtfs_cal(
-                    "WEEKDAY", true, true, true, true, true, false, false,
-                    "20260302", "20260306",
+                    "WEEKDAY", true, true, true, true, true, false, false, "20260302", "20260306",
                 ),
                 // Weekend service
                 gtfs_cal(
-                    "WEEKEND", false, false, false, false, false, true, true,
-                    "20260302", "20260308",
+                    "WEEKEND", false, false, false, false, false, true, true, "20260302",
+                    "20260308",
                 ),
             ],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let mut schedules = importer.schedules().to_vec();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let mut schedules = data.schedules().to_vec();
         schedules.sort_by_key(|s| s.id().clone());
 
         assert_eq!(schedules.len(), 2);
 
-        let weekday = schedules.iter().find(|s| s.id().as_str() == "WEEKDAY").unwrap();
+        let weekday = schedules
+            .iter()
+            .find(|s| s.id().as_str() == "WEEKDAY")
+            .unwrap();
         let mut weekday_dates = weekday.dates().to_vec();
         weekday_dates.sort();
         assert_eq!(
@@ -1036,7 +1019,10 @@ mod tests {
             vec!["20260302", "20260303", "20260304", "20260305", "20260306"]
         );
 
-        let weekend = schedules.iter().find(|s| s.id().as_str() == "WEEKEND").unwrap();
+        let weekend = schedules
+            .iter()
+            .find(|s| s.id().as_str() == "WEEKEND")
+            .unwrap();
         let mut weekend_dates = weekend.dates().to_vec();
         weekend_dates.sort();
         assert_eq!(weekend_dates, vec!["20260307", "20260308"]);
@@ -1053,8 +1039,8 @@ mod tests {
             calendar: vec![],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let result = importer.stations();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let result = data.stations();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id(), &ImportedStationId::from("S1".to_owned()));
     }
@@ -1075,8 +1061,8 @@ mod tests {
             calendar: vec![],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        let result = importer.stations();
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let result = data.stations();
         assert_eq!(result.len(), 1);
         assert_eq!(
             result[0],
@@ -1100,8 +1086,8 @@ mod tests {
             calendar: vec![],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        assert!(importer.trip_legs().is_empty());
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        assert!(data.trip_legs().is_empty());
     }
 
     #[test]
@@ -1122,8 +1108,8 @@ mod tests {
             calendar: vec![],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        assert!(importer.trip_legs().is_empty());
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        assert!(data.trip_legs().is_empty());
     }
 
     #[test]
@@ -1145,8 +1131,8 @@ mod tests {
             calendar: vec![],
             calendar_dates: vec![],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
-        assert!(importer.trip_legs().is_empty());
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        assert!(data.trip_legs().is_empty());
     }
 
     // ── integration ──────────────────────────────────────────────────────────
@@ -1172,17 +1158,17 @@ mod tests {
                 GTFSExceptionType::ServiceAdded,
             )],
         };
-        let importer = GTFSImporter::from_parser(&parser, "source");
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
 
         // stations
-        let mut stations = importer.stations().to_vec();
+        let mut stations = data.stations().to_vec();
         stations.sort_by_key(|s| s.id().clone());
         assert_eq!(stations.len(), 2);
         assert_eq!(stations[0].id(), &ImportedStationId::from("S1".to_owned()));
         assert_eq!(stations[1].id(), &ImportedStationId::from("S2".to_owned()));
 
         // trip legs
-        let legs = importer.trip_legs();
+        let legs = data.trip_legs();
         assert_eq!(legs.len(), 1);
         assert_eq!(legs[0].origin(), &ImportedStationId::from("S1".to_owned()));
         assert_eq!(
@@ -1193,7 +1179,7 @@ mod tests {
         assert_eq!(legs[0].arrival(), 1200);
 
         // schedules
-        let schedules = importer.schedules();
+        let schedules = data.schedules();
         assert_eq!(schedules.len(), 1);
         assert_eq!(
             schedules[0].id(),
@@ -1202,7 +1188,7 @@ mod tests {
         assert_eq!(schedules[0].dates(), &["20260601"]);
 
         // schedules_by_route
-        let by_route = importer.schedules_by_route();
+        let by_route = data.schedules_by_route();
         let r1 = ImportedRouteId::from("R1".to_owned());
         assert_eq!(
             by_route[&r1],
