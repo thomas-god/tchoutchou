@@ -1,6 +1,6 @@
 services:
   tchoutchou:
-    image: ghcr.io/thomas-god/tchoutchou:main
+    image: ghcr.io/thomas-god/tchoutchou-proto:main
     labels:
       - 'traefik.enable=true'
 
