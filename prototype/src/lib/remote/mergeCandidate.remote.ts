@@ -60,7 +60,6 @@ export const fetchMergeCandidates = query(
 	z.object({ maxDistanceKm: z.number() }),
 	async ({ maxDistanceKm }): Promise<MergeCandidateGroup[]> => {
 		const backendUrl = getEnv('BACKEND_URL');
-    console.log(backendUrl)
 		const res = await fetch(
 			`${backendUrl}/api/stations/nearby?max_distance_km=${maxDistanceKm}`
 		);
