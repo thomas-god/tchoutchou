@@ -31,6 +31,8 @@ impl SqliteRepository {
     }
 
     fn from_connection(conn: Connection) -> Result<Self> {
+        // SQLite disables FK enforcement by default; turn it on for every connection.
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         let repo = Self { conn };
         repo.init_schema()?;
         Ok(repo)
@@ -47,12 +49,33 @@ impl SqliteRepository {
                 lon    REAL NOT NULL
             );
 
-            -- dates are stored as a comma-separated list of YYYYMMDD strings
+            CREATE TABLE IF NOT EXISTS internal_stations (
+                id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                lat  REAL NOT NULL,
+                lon  REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS station_mappings (
+                source      TEXT    NOT NULL,
+                source_id   TEXT    NOT NULL,
+                internal_id INTEGER NOT NULL REFERENCES internal_stations(id),
+                PRIMARY KEY (source, source_id)
+            );
+
             CREATE TABLE IF NOT EXISTS schedules (
                 source TEXT NOT NULL,
-                id     TEXT PRIMARY KEY,
-                dates  TEXT NOT NULL
+                id     TEXT PRIMARY KEY
             );
+
+            -- One row per (schedule, date); indexed for fast per-date trip retrieval.
+            CREATE TABLE IF NOT EXISTS schedule_dates (
+                schedule_id TEXT NOT NULL REFERENCES schedules(id),
+                source      TEXT NOT NULL,
+                date        TEXT NOT NULL,
+                PRIMARY KEY (schedule_id, date)
+            );
+            CREATE INDEX idx_schedule_dates_date ON schedule_dates (date);
 
             CREATE TABLE IF NOT EXISTS trips (
                 source      TEXT    NOT NULL,
@@ -69,22 +92,6 @@ impl SqliteRepository {
                 route_id    TEXT NOT NULL,
                 schedule_id TEXT NOT NULL,
                 PRIMARY KEY (source, route_id, schedule_id)
-            );
-
-            -- canonical, source-agnostic stations
-            CREATE TABLE IF NOT EXISTS internal_stations (
-                id   INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                lat  REAL NOT NULL,
-                lon  REAL NOT NULL
-            );
-
-            -- maps every (source, source_id) pair to one internal_station
-            CREATE TABLE IF NOT EXISTS station_mappings (
-                source      TEXT    NOT NULL,
-                source_id   TEXT    NOT NULL,
-                internal_id INTEGER NOT NULL REFERENCES internal_stations(id),
-                PRIMARY KEY (source, source_id)
             );
             ",
         )
@@ -128,12 +135,17 @@ impl SqliteRepository {
             .collect()
     }
 
-    /// Delete all rows from the three volatile tables in a single batch.
+    /// Delete all timetable rows for `source` in a single batch.
     fn truncate_timetable(tx: &Transaction, source: &str) {
         tx.prepare_cached("DELETE FROM route_schedules WHERE source = ?1;")
             .expect("delete_from_route_schedules: prepare failed")
             .execute(params![source])
             .expect("delete_from_route_schedules: execute failed");
+
+        tx.prepare_cached("DELETE FROM schedule_dates WHERE source = ?1;")
+            .expect("delete_schedule_dates: prepare failed")
+            .execute(params![source])
+            .expect("delete_schedule_dates: execute failed");
 
         tx.prepare_cached("DELETE FROM schedules WHERE source = ?1;")
             .expect("delete_schedules: prepare failed")
@@ -160,18 +172,25 @@ impl SqliteRepository {
         }
     }
 
-    /// Insert schedules (table was just truncated, so no conflict is expected).
+    /// Insert schedules (tables were just truncated, so no conflict is expected).
     fn insert_schedules(tx: &Transaction, schedules: &[ImportedSchedule], source: &str) {
-        let mut stmt = tx
+        let mut schedule_stmt = tx
+            .prepare_cached("INSERT INTO schedules (id, source) VALUES (?1, ?2)")
+            .expect("insert_schedules: prepare schedules failed");
+        let mut date_stmt = tx
             .prepare_cached(
-                "INSERT INTO schedules (id, source, dates)
-                 VALUES (?1, ?2, ?3)",
+                "INSERT INTO schedule_dates (schedule_id, source, date) VALUES (?1, ?2, ?3)",
             )
-            .expect("insert_schedules: prepare failed");
+            .expect("insert_schedules: prepare schedule_dates failed");
         for s in schedules {
-            let dates = s.dates().join(",");
-            stmt.execute(params![s.id().as_str(), source, dates])
-                .expect("insert_schedules: execute failed");
+            schedule_stmt
+                .execute(params![s.id().as_str(), source])
+                .expect("insert_schedules: execute schedules failed");
+            for date in s.dates() {
+                date_stmt
+                    .execute(params![s.id().as_str(), source, date])
+                    .expect("insert_schedules: execute schedule_dates failed");
+            }
         }
     }
 
@@ -327,23 +346,75 @@ impl TrainDataRepository for SqliteRepository {
     }
 
     fn all_schedules(&self) -> Vec<ImportedSchedule> {
+        // LEFT JOIN so that schedules with no dates still appear (with a NULL date).
         let mut stmt = self
             .conn
-            .prepare("SELECT id, dates FROM schedules")
+            .prepare(
+                "SELECT s.id, sd.date
+                 FROM schedules s
+                 LEFT JOIN schedule_dates sd ON sd.schedule_id = s.id
+                 ORDER BY s.id, sd.date",
+            )
             .expect("all_schedules: prepare failed");
 
-        stmt.query_map([], |row| {
-            let id: String = row.get(0)?;
-            let dates_raw: String = row.get(1)?;
-            let dates: Vec<String> = if dates_raw.is_empty() {
-                vec![]
-            } else {
-                dates_raw.split(',').map(str::to_owned).collect()
-            };
-            Ok(ImportedSchedule::new(ImportedScheduleId::from(id), dates))
+        let rows: Vec<(String, Option<String>)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("all_schedules: query failed")
+            .map(|r| r.expect("all_schedules: row mapping failed"))
+            .collect();
+
+        // Group consecutive rows that share the same schedule id.
+        let mut result: Vec<(String, Vec<String>)> = Vec::new();
+        for (id, date_opt) in rows {
+            match result.last_mut() {
+                Some((last_id, dates)) if *last_id == id => {
+                    if let Some(d) = date_opt {
+                        dates.push(d);
+                    }
+                }
+                _ => {
+                    let mut dates = Vec::new();
+                    if let Some(d) = date_opt {
+                        dates.push(d);
+                    }
+                    result.push((id, dates));
+                }
+            }
+        }
+        result
+            .into_iter()
+            .map(|(id, dates)| ImportedSchedule::new(ImportedScheduleId::from(id), dates))
+            .collect()
+    }
+
+    fn trips_for_date(&self, date: &str) -> Vec<ImportedTripLeg> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT DISTINCT t.route, t.origin, t.destination, t.departure, t.arrival
+                 FROM trips t
+                 JOIN route_schedules rs ON rs.route_id = t.route AND rs.source = t.source
+                 JOIN schedule_dates sd ON sd.schedule_id = rs.schedule_id
+                 WHERE sd.date = ?1",
+            )
+            .expect("trips_for_date: prepare failed");
+
+        stmt.query_map(params![date], |row| {
+            let route: String = row.get(0)?;
+            let origin: String = row.get(1)?;
+            let destination: String = row.get(2)?;
+            let departure: i64 = row.get(3)?;
+            let arrival: i64 = row.get(4)?;
+            Ok(ImportedTripLeg::new(
+                ImportedRouteId::from(route),
+                ImportedStationId::from(origin),
+                ImportedStationId::from(destination),
+                departure as usize,
+                arrival as usize,
+            ))
         })
-        .expect("all_schedules: query failed")
-        .map(|r| r.expect("all_schedules: row mapping failed"))
+        .expect("trips_for_date: query failed")
+        .map(|r| r.expect("trips_for_date: row mapping failed"))
         .collect()
     }
 
@@ -888,6 +959,86 @@ mod tests {
         let mut expected = trips;
         expected.sort();
         assert_eq!(result, expected);
+    }
+
+    // ---- trips_for_date ----
+
+    /// Build a [`TrainDataToImport`] where every trip comes with an explicit
+    /// route→schedule→date chain.
+    fn data_with_route_schedule(
+        trips: Vec<ImportedTripLeg>,
+        route_id: &str,
+        schedule_id: &str,
+        date: &str,
+        source: &str,
+    ) -> TrainDataToImport {
+        let sched = schedule(schedule_id, &[date]);
+        let mut sbr = HashMap::new();
+        sbr.insert(
+            ImportedRouteId::from(route_id.to_owned()),
+            vec![ImportedScheduleId::from(schedule_id.to_owned())],
+        );
+        TrainDataToImport::new(vec![], trips, vec![sched], sbr, source.to_owned())
+    }
+
+    #[test]
+    fn trips_for_date_returns_trips_active_on_that_date() {
+        let mut repo = make_repo();
+        let t = trip("R1", "A", "B", 100, 200);
+        repo.import_timetable(data_with_route_schedule(
+            vec![t.clone()],
+            "R1",
+            "S1",
+            "20260303",
+            "source",
+        ));
+        let result = repo.trips_for_date("20260303");
+        assert_eq!(result, vec![t]);
+    }
+
+    #[test]
+    fn trips_for_date_excludes_trips_from_other_dates() {
+        let mut repo = make_repo();
+        repo.import_timetable(data_with_route_schedule(
+            vec![trip("R1", "A", "B", 100, 200)],
+            "R1",
+            "S1",
+            "20260101",
+            "source",
+        ));
+        // Querying a different date must return nothing.
+        assert!(repo.trips_for_date("20260303").is_empty());
+    }
+
+    #[test]
+    fn trips_for_date_spans_multiple_sources() {
+        let mut repo = make_repo();
+        // Source "db": R1 active on 20260303
+        repo.import_timetable(data_with_route_schedule(
+            vec![trip("R1", "A", "B", 100, 200)],
+            "R1",
+            "S1",
+            "20260303",
+            "db",
+        ));
+        // Source "sncf": R2 active on 20260303
+        repo.import_timetable(data_with_route_schedule(
+            vec![trip("R2", "C", "D", 300, 400)],
+            "R2",
+            "S2",
+            "20260303",
+            "sncf",
+        ));
+        // Source "fr": R3 NOT active on 20260303
+        repo.import_timetable(data_with_route_schedule(
+            vec![trip("R3", "E", "F", 500, 600)],
+            "R3",
+            "S3",
+            "20260101",
+            "fr",
+        ));
+        let result = repo.trips_for_date("20260303");
+        assert_eq!(result.len(), 2);
     }
 
     // ---- internal stations and station mappings ----
