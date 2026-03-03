@@ -405,6 +405,10 @@ impl<R: TrainDataRepository> ScheduleService<R> {
     /// Return all [`InternalStation`]s that have at least one neighbour within `max_distance_km`
     /// (haversine), each paired with its sorted candidate list. Stations with no nearby match
     /// are omitted. Intended for bulk merge-candidate discovery.
+    ///
+    /// Only stations from **different** dataset sources are considered as candidates for each
+    /// other. Stations whose source sets overlap are not in scope (duplicates within a single
+    /// dataset are a data-quality issue for that dataset, not something we reconcile here).
     pub fn find_all_merge_candidates(
         &self,
         max_distance_km: f64,
@@ -421,6 +425,7 @@ impl<R: TrainDataRepository> ScheduleService<R> {
                 let mut candidates: Vec<MergeCandidate> = all
                     .iter()
                     .filter(|other| other.id() != station.id())
+                    .filter(|other| has_disjoint_sources(station, other))
                     .filter_map(|other| {
                         let d =
                             haversine_km(station.lat(), station.lon(), other.lat(), other.lon());
@@ -488,6 +493,17 @@ fn build_graph(trips: &[ImportedTripLeg], mappings: &[StationMapping]) -> Graph 
     }
 
     Graph::new(trips_by_nodes)
+}
+
+/// Returns `true` when the two stations have no data source in common, meaning they could
+/// represent the same physical place imported from different providers. Stations that share
+/// at least one source are considered intra-dataset duplicates and are not merge candidates.
+fn has_disjoint_sources(a: &EnrichedInternalStation, b: &EnrichedInternalStation) -> bool {
+    let sources_a: std::collections::HashSet<&str> =
+        a.children().iter().map(|c| c.source.as_str()).collect();
+    let sources_b: std::collections::HashSet<&str> =
+        b.children().iter().map(|c| c.source.as_str()).collect();
+    sources_a.is_disjoint(&sources_b)
 }
 
 /// Haversine great-circle distance in kilometres between two (lat, lon) points in decimal degrees.
@@ -916,6 +932,76 @@ mod tests {
             cand_names,
             ["B", "C"],
             "candidates must be sorted ascending"
+        );
+    }
+
+    #[test]
+    fn merge_candidates_same_source_stations_are_excluded() {
+        // Two close stations that both come from the same source must NOT be candidates.
+        let mut mock = MockTrainDataRepository::new();
+        mock.expect_all_internal_stations_enriched()
+            .return_once(|| {
+                vec![
+                    enriched_with_child(1, "A", 0.0, 0.0, "sncf", "sncf-a"),
+                    enriched_with_child(2, "B", 0.0, 0.001, "sncf", "sncf-b"),
+                ]
+            });
+
+        let service = ScheduleService::new(mock);
+        let result = service.find_all_merge_candidates(1.0).unwrap();
+        assert!(
+            result.is_empty(),
+            "intra-dataset duplicates must not appear as merge candidates"
+        );
+    }
+
+    #[test]
+    fn merge_candidates_cross_source_stations_are_included() {
+        // Two close stations from different sources must be candidates for each other.
+        let mut mock = MockTrainDataRepository::new();
+        mock.expect_all_internal_stations_enriched()
+            .return_once(|| {
+                vec![
+                    enriched_with_child(1, "A", 0.0, 0.0, "sncf", "sncf-a"),
+                    enriched_with_child(2, "B", 0.0, 0.001, "db", "db-b"),
+                ]
+            });
+
+        let service = ScheduleService::new(mock);
+        let result = service.find_all_merge_candidates(1.0).unwrap();
+        assert_eq!(result.len(), 2, "both stations must appear in the result");
+        let group_a = result.iter().find(|g| g.station().name() == "A").unwrap();
+        assert_eq!(group_a.candidates().len(), 1);
+        assert_eq!(group_a.candidates()[0].station().name(), "B");
+    }
+
+    #[test]
+    fn merge_candidates_shared_source_station_excluded_mixed_set() {
+        // A (sncf) is close to B (db) and to C (sncf).
+        // B is a cross-source candidate for A; C shares the source with A and must be excluded.
+        let mut mock = MockTrainDataRepository::new();
+        mock.expect_all_internal_stations_enriched()
+            .return_once(|| {
+                vec![
+                    enriched_with_child(1, "A", 0.0, 0.0, "sncf", "sncf-a"),
+                    enriched_with_child(2, "B", 0.0, 0.001, "db", "db-b"),
+                    enriched_with_child(3, "C", 0.0, 0.002, "sncf", "sncf-c"),
+                ]
+            });
+
+        let service = ScheduleService::new(mock);
+        let result = service.find_all_merge_candidates(10.0).unwrap();
+
+        let group_a = result.iter().find(|g| g.station().name() == "A").unwrap();
+        let cand_names: Vec<&str> = group_a
+            .candidates()
+            .iter()
+            .map(|c| c.station().name())
+            .collect();
+        assert_eq!(
+            cand_names,
+            ["B"],
+            "only the cross-source station B should be a candidate for A"
         );
     }
 
