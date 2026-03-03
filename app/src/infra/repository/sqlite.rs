@@ -345,48 +345,6 @@ impl TrainDataRepository for SqliteRepository {
         .collect()
     }
 
-    fn all_schedules(&self) -> Vec<ImportedSchedule> {
-        // LEFT JOIN so that schedules with no dates still appear (with a NULL date).
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT s.id, sd.date
-                 FROM schedules s
-                 LEFT JOIN schedule_dates sd ON sd.schedule_id = s.id
-                 ORDER BY s.id, sd.date",
-            )
-            .expect("all_schedules: prepare failed");
-
-        let rows: Vec<(String, Option<String>)> = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .expect("all_schedules: query failed")
-            .map(|r| r.expect("all_schedules: row mapping failed"))
-            .collect();
-
-        // Group consecutive rows that share the same schedule id.
-        let mut result: Vec<(String, Vec<String>)> = Vec::new();
-        for (id, date_opt) in rows {
-            match result.last_mut() {
-                Some((last_id, dates)) if *last_id == id => {
-                    if let Some(d) = date_opt {
-                        dates.push(d);
-                    }
-                }
-                _ => {
-                    let mut dates = Vec::new();
-                    if let Some(d) = date_opt {
-                        dates.push(d);
-                    }
-                    result.push((id, dates));
-                }
-            }
-        }
-        result
-            .into_iter()
-            .map(|(id, dates)| ImportedSchedule::new(ImportedScheduleId::from(id), dates))
-            .collect()
-    }
-
     fn trips_for_date(&self, date: &str) -> Vec<ImportedTripLeg> {
         let mut stmt = self
             .conn
@@ -415,80 +373,6 @@ impl TrainDataRepository for SqliteRepository {
         })
         .expect("trips_for_date: query failed")
         .map(|r| r.expect("trips_for_date: row mapping failed"))
-        .collect()
-    }
-
-    fn all_trips(&self) -> Vec<ImportedTripLeg> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT route, origin, destination, departure, arrival
-                 FROM trips",
-            )
-            .expect("all_trips: prepare failed");
-
-        stmt.query_map([], |row| {
-            let route: String = row.get(0)?;
-            let origin: String = row.get(1)?;
-            let destination: String = row.get(2)?;
-            let departure: i64 = row.get(3)?;
-            let arrival: i64 = row.get(4)?;
-            Ok(ImportedTripLeg::new(
-                ImportedRouteId::from(route),
-                ImportedStationId::from(origin),
-                ImportedStationId::from(destination),
-                departure as usize,
-                arrival as usize,
-            ))
-        })
-        .expect("all_trips: query failed")
-        .map(|r| r.expect("all_trips: row mapping failed"))
-        .collect()
-    }
-
-    fn schedules_by_route(&self) -> HashMap<ImportedRouteId, Vec<ImportedScheduleId>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT route_id, schedule_id FROM route_schedules")
-            .expect("schedules_by_route: prepare failed");
-
-        let mut map: HashMap<ImportedRouteId, Vec<ImportedScheduleId>> = HashMap::new();
-        stmt.query_map([], |row| {
-            let route: String = row.get(0)?;
-            let schedule: String = row.get(1)?;
-            Ok((route, schedule))
-        })
-        .expect("schedules_by_route: query failed")
-        .map(|r| r.expect("schedules_by_route: row mapping failed"))
-        .for_each(|(route, schedule)| {
-            map.entry(ImportedRouteId::from(route))
-                .or_default()
-                .push(ImportedScheduleId::from(schedule));
-        });
-
-        map
-    }
-
-    fn internal_stations(&self) -> Vec<InternalStation> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, name, lat, lon FROM internal_stations")
-            .expect("internal_stations: prepare failed");
-
-        stmt.query_map([], |row| {
-            let id: i64 = row.get(0)?;
-            let name: String = row.get(1)?;
-            let lat: f64 = row.get(2)?;
-            let lon: f64 = row.get(3)?;
-            Ok(InternalStation::new(
-                InternalStationId::from(id),
-                name,
-                lat,
-                lon,
-            ))
-        })
-        .expect("internal_stations: query failed")
-        .map(|r| r.expect("internal_stations: row mapping failed"))
         .collect()
     }
 
@@ -617,6 +501,127 @@ impl TrainDataRepository for SqliteRepository {
 
         tx.commit().expect("remap_station: commit failed");
         Ok(())
+    }
+}
+
+/// Test-only helpers that expose read access to tables that are not part of the public
+/// [`TrainDataRepository`] contract but are required to verify the implementation.
+#[cfg(test)]
+impl SqliteRepository {
+    fn all_schedules(&self) -> Vec<ImportedSchedule> {
+        // LEFT JOIN so that schedules with no dates still appear (with a NULL date).
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT s.id, sd.date
+                 FROM schedules s
+                 LEFT JOIN schedule_dates sd ON sd.schedule_id = s.id
+                 ORDER BY s.id, sd.date",
+            )
+            .expect("all_schedules: prepare failed");
+
+        let rows: Vec<(String, Option<String>)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("all_schedules: query failed")
+            .map(|r| r.expect("all_schedules: row mapping failed"))
+            .collect();
+
+        // Group consecutive rows that share the same schedule id.
+        let mut result: Vec<(String, Vec<String>)> = Vec::new();
+        for (id, date_opt) in rows {
+            match result.last_mut() {
+                Some((last_id, dates)) if *last_id == id => {
+                    if let Some(d) = date_opt {
+                        dates.push(d);
+                    }
+                }
+                _ => {
+                    let mut dates = Vec::new();
+                    if let Some(d) = date_opt {
+                        dates.push(d);
+                    }
+                    result.push((id, dates));
+                }
+            }
+        }
+        result
+            .into_iter()
+            .map(|(id, dates)| ImportedSchedule::new(ImportedScheduleId::from(id), dates))
+            .collect()
+    }
+
+    fn all_trips(&self) -> Vec<ImportedTripLeg> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT route, origin, destination, departure, arrival
+                 FROM trips",
+            )
+            .expect("all_trips: prepare failed");
+
+        stmt.query_map([], |row| {
+            let route: String = row.get(0)?;
+            let origin: String = row.get(1)?;
+            let destination: String = row.get(2)?;
+            let departure: i64 = row.get(3)?;
+            let arrival: i64 = row.get(4)?;
+            Ok(ImportedTripLeg::new(
+                ImportedRouteId::from(route),
+                ImportedStationId::from(origin),
+                ImportedStationId::from(destination),
+                departure as usize,
+                arrival as usize,
+            ))
+        })
+        .expect("all_trips: query failed")
+        .map(|r| r.expect("all_trips: row mapping failed"))
+        .collect()
+    }
+
+    fn schedules_by_route(&self) -> HashMap<ImportedRouteId, Vec<ImportedScheduleId>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT route_id, schedule_id FROM route_schedules")
+            .expect("schedules_by_route: prepare failed");
+
+        let mut map: HashMap<ImportedRouteId, Vec<ImportedScheduleId>> = HashMap::new();
+        stmt.query_map([], |row| {
+            let route: String = row.get(0)?;
+            let schedule: String = row.get(1)?;
+            Ok((route, schedule))
+        })
+        .expect("schedules_by_route: query failed")
+        .map(|r| r.expect("schedules_by_route: row mapping failed"))
+        .for_each(|(route, schedule)| {
+            map.entry(ImportedRouteId::from(route))
+                .or_default()
+                .push(ImportedScheduleId::from(schedule));
+        });
+
+        map
+    }
+
+    fn internal_stations(&self) -> Vec<InternalStation> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, lat, lon FROM internal_stations")
+            .expect("internal_stations: prepare failed");
+
+        stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let name: String = row.get(1)?;
+            let lat: f64 = row.get(2)?;
+            let lon: f64 = row.get(3)?;
+            Ok(InternalStation::new(
+                InternalStationId::from(id),
+                name,
+                lat,
+                lon,
+            ))
+        })
+        .expect("internal_stations: query failed")
+        .map(|r| r.expect("internal_stations: row mapping failed"))
+        .collect()
     }
 }
 

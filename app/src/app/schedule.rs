@@ -8,7 +8,7 @@ use derive_more::{Constructor, From};
 use crate::domain::optim::{Graph, StationId, Trip};
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-/// `Imported*`` types describe the expected shapes of data to be ingested by the schedule service.
+// `Imported*`` types describe the expected shapes of data to be ingested by the schedule service.
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// A station represents a physical place where trains can depart from and arrive at.
@@ -144,8 +144,8 @@ impl TrainDataToImport {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-/// `Internal*` types describe internal, canonical, shapes of data, independant of the source,
-/// provider or input format.
+// `Internal*` types describe internal, canonical, shapes of data, independant of the source,
+// provider or input format.
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// A stable, source-agnostic identifier for a physical station. An internal station aggregates one
@@ -193,7 +193,7 @@ impl InternalStation {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-/// `ScheduleService` related types.
+// `ScheduleService` related types.
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// Links an [`ImportedStationId`] to its canonical [`InternalStation`].
@@ -239,16 +239,10 @@ pub trait TrainDataRepository {
     fn import_timetable(&mut self, data: TrainDataToImport) -> TrainDataImportResult;
 
     fn all_stations(&self) -> Vec<ImportedStation>;
-    fn all_schedules(&self) -> Vec<ImportedSchedule>;
-    fn all_trips(&self) -> Vec<ImportedTripLeg>;
-    fn schedules_by_route(&self) -> HashMap<ImportedRouteId, Vec<ImportedScheduleId>>;
 
     /// Return only the trips whose route runs on `date` (format `YYYYMMDD`).
     /// Filtering is done at the persistence layer for efficiency.
     fn trips_for_date(&self, date: &str) -> Vec<ImportedTripLeg>;
-
-    /// Return all canonical internal stations.
-    fn internal_stations(&self) -> Vec<InternalStation>;
 
     /// Return all source-to-internal station mappings.
     fn station_mappings(&self) -> Vec<StationMapping>;
@@ -411,19 +405,8 @@ pub mod test_utils {
         impl TrainDataRepository for TrainDataRepository {
             fn import_timetable(&mut self, data: TrainDataToImport) -> TrainDataImportResult;
             fn all_stations(&self) -> Vec<ImportedStation>;
-            fn all_schedules(&self) -> Vec<ImportedSchedule>;
-            fn all_trips(&self) -> Vec<ImportedTripLeg>;
-            fn schedules_by_route(&self) -> HashMap<ImportedRouteId, Vec<ImportedScheduleId>>;
             fn trips_for_date(&self, date: &str) -> Vec<ImportedTripLeg>;
-            /// Return all canonical internal stations.
-            fn internal_stations(&self) -> Vec<InternalStation>;
-            /// Return all source-to-internal station mappings.
             fn station_mappings(&self) -> Vec<StationMapping>;
-            /// Reassign an existing source station mapping to a different internal station.
-            ///
-            /// Returns [`RemapError::MappingNotFound`] when no mapping exists for
-            /// `(source, source_id)`, and [`RemapError::InternalStationNotFound`] when
-            /// `new_internal_id` does not refer to a known internal station.
             fn update_station_mapping(
                 &mut self,
                 source: &str,
