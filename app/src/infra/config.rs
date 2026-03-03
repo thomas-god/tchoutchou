@@ -3,23 +3,26 @@ use std::{env, fs, path::Path};
 use anyhow::Context;
 
 const SERVER_PORT_KEY: &str = "SERVER_PORT";
-
 const ALLOW_ORIGIN_KEY: &str = "ALLOW_ORIGIN";
+const DATA_LOCATION_KEY: &str = "DATA_LOCATION";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     pub server_port: String,
     pub allow_origin: String,
+    pub data_location: String,
 }
 
 impl Config {
     pub fn from_env() -> anyhow::Result<Config> {
         let server_port = load_env(SERVER_PORT_KEY)?;
         let allow_origin = load_env(ALLOW_ORIGIN_KEY)?;
+        let data_location = load_env(DATA_LOCATION_KEY)?;
 
         Ok(Config {
             server_port,
             allow_origin,
+            data_location,
         })
     }
 }
