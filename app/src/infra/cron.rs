@@ -70,7 +70,7 @@ impl CronServiceBuilder {
         });
 
         // DB (Deutsche Bahn) import
-        let svc = schedule_service;
+        let svc = schedule_service.clone();
         service.register("db", move || {
             let mut svc = svc.clone();
             async move {
@@ -91,6 +91,28 @@ impl CronServiceBuilder {
             }
         });
 
+        // Renfe import
+        let svc = schedule_service;
+        service.register("renfe", move || {
+            let mut svc = svc.clone();
+            async move {
+                let archive = GTFSFetcher::fetch(
+                    "https://ssl.renfe.com/gtransit/Fichero_AV_LD/google_transit.zip",
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("fetch renfe: {e}"))?;
+
+                let parser = GTFSParser::parse(archive.path().to_str().unwrap())
+                    .map_err(|e| anyhow::anyhow!("parse renfe: {e}"))?;
+
+                let importer = GTFSImporter::from_parser(&parser, "renfe");
+
+                svc.ingest(importer.as_data())
+                    .map_err(|_| anyhow::anyhow!("ingest renfe failed"))?;
+
+                Ok(())
+            }
+        });
         service
     }
 }
