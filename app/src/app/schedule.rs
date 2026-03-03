@@ -7,8 +7,9 @@ use derive_more::{Constructor, From};
 
 use crate::domain::optim::{Graph, StationId, Trip};
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
-pub struct ImportedStationId(String);
+///////////////////////////////////////////////////////////////////////////////////////////////////
+/// `Imported*`` types describe the expected shapes of data to be ingested by the schedule service.
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// A station represents a physical place where trains can depart from and arrive at.
 #[derive(Debug, Clone, PartialEq, Constructor)]
@@ -34,52 +35,21 @@ impl ImportedStation {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
+pub struct ImportedStationId(String);
+
 impl ImportedStationId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
-pub struct ImportedScheduleId(String);
-
-/// A schedule is a set of dates for which a particular trip/train will run.
-#[derive(Debug, Clone, Constructor, PartialEq)]
-pub struct ImportedSchedule {
-    id: ImportedScheduleId,
-    dates: Vec<String>,
-}
-
-impl ImportedSchedule {
-    pub fn id(&self) -> &ImportedScheduleId {
-        &self.id
-    }
-    pub fn dates(&self) -> &[String] {
-        &self.dates
-    }
-}
-
-impl ImportedScheduleId {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// A route is an abstract concept that group trip that share some caracteristics (headsign,
-/// schedule, etc.). For our domain, it's mostly used as an intermediary way to map a trip leg
-/// to its schedules.
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
-pub struct ImportedRouteId(String);
-
-impl ImportedRouteId {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// A trip leg is the core concept used by our domain. It represents a train leaving its origin
-/// station at departure and reaching its destination at arrival. The actual dates the train will
-/// actually run needs to be retrieve by the schedules associated with its [`ImportedRouteId`].
+/// A trip leg is the core concept used by our domain. It represents a train leaving its *origin*
+/// station at *departure* time and reaching its *destination* station at *arrival time*. For
+/// example, a train leaving Paris Gare de Lyon at 09:20 and reaching Lyon Part-Dieu at 11:15.
+///
+/// The dates for which the train will actually run needs to be retrieved by the schedules
+/// associated with the trips's [`ImportedRouteId`].
 #[derive(Debug, Clone, Constructor, PartialEq, PartialOrd, Eq, Ord)]
 pub struct ImportedTripLeg {
     route: ImportedRouteId,
@@ -107,6 +77,45 @@ impl ImportedTripLeg {
     }
 }
 
+/// A schedule is a set of dates for which a particular trip/train will run.
+#[derive(Debug, Clone, Constructor, PartialEq)]
+pub struct ImportedSchedule {
+    id: ImportedScheduleId,
+    dates: Vec<String>,
+}
+
+impl ImportedSchedule {
+    pub fn id(&self) -> &ImportedScheduleId {
+        &self.id
+    }
+    pub fn dates(&self) -> &[String] {
+        &self.dates
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
+pub struct ImportedScheduleId(String);
+
+impl ImportedScheduleId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A route is an abstract concept that group trips sharing some caracteristics (headsign,
+/// schedule, etc.). For our domain, it's mostly used as an intermediary way to map a trip leg
+/// to its schedule(s).
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
+pub struct ImportedRouteId(String);
+
+impl ImportedRouteId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// [`TrainDataToImport`] represents the set of data requiered to ingest train schedules for a
+/// particular source.
 #[derive(Debug, Clone, Constructor)]
 pub struct TrainDataToImport {
     stations: Vec<ImportedStation>,
@@ -134,9 +143,16 @@ impl TrainDataToImport {
     }
 }
 
-/// A stable, source-agnostic identifier for a physical station.  An internal
-/// station aggregates one or more raw (source) stations that represent the
-/// same physical place.
+///////////////////////////////////////////////////////////////////////////////////////////////////
+/// `Internal*` types describe internal, canonical, shapes of data, independant of the source,
+/// provider or input format.
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+/// A stable, source-agnostic identifier for a physical station. An internal station aggregates one
+/// or more [`ImportedStation`]s that represent the same physical place.
+///
+/// For example, *Paris Gare de l'Est* exists with distinct IDs in the SNCF and DB datasets, but will
+/// point to the same [`InternalStationId`].
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, Ord)]
 pub struct InternalStationId(i64);
 
@@ -152,8 +168,7 @@ impl From<i64> for InternalStationId {
     }
 }
 
-/// Canonical representation of a physical station, independent of any
-/// particular data source.
+/// Canonical representation of a physical station, independent of any particular data source.
 #[derive(Debug, Clone, PartialEq, Constructor)]
 pub struct InternalStation {
     id: InternalStationId,
@@ -177,14 +192,15 @@ impl InternalStation {
     }
 }
 
-/// Links a single raw (source) station to its canonical [`InternalStation`].
+///////////////////////////////////////////////////////////////////////////////////////////////////
+/// `ScheduleService` related types.
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+/// Links an [`ImportedStationId`] to its canonical [`InternalStation`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct StationMapping {
-    /// The data source the raw station belongs to (e.g. `"db"` or `"sncf"`).
     pub source: String,
-    /// The identifier used by that source for this station.
     pub source_id: ImportedStationId,
-    /// The canonical internal station this source station maps to.
     pub internal_id: InternalStationId,
 }
 
@@ -197,23 +213,21 @@ pub enum StationChange {
     Updated(ImportedStation),
 }
 
-/// Outcome returned by [`TrainDataRepository::import_timetable`].
 #[derive(Debug, Clone, PartialEq)]
-pub struct TimetableImportResult {
-    /// Stations that are new or whose attributes changed in this import.
+pub struct TrainDataImportResult {
     pub station_changes: Vec<StationChange>,
     /// New internal stations that were automatically created because an
     /// incoming source station had no existing mapping.
     pub new_internal_stations: Vec<InternalStationId>,
 }
 
-/// Errors that can be returned by [`TrainDataRepository::remap_station`].
 #[derive(Debug, Clone, PartialEq)]
-pub enum RemapError {
-    /// No mapping exists for the given `(source, source_id)` pair.
+pub enum RemapStationError {
+    /// No mapping exists for the given `(source, station_id)` pair.
     MappingNotFound,
     /// The target [`InternalStationId`] does not exist in the repository.
     InternalStationNotFound,
+    Error,
 }
 
 /// Persistence contract for stations, trips and schedules.
@@ -222,7 +236,7 @@ pub trait TrainDataRepository {
     /// and upsert stations, returning information about which stations are new or changed.
     /// For each incoming source station that has no existing mapping to an internal
     /// station, a new [`InternalStation`] is created and linked automatically.
-    fn import_timetable(&mut self, data: TrainDataToImport) -> TimetableImportResult;
+    fn import_timetable(&mut self, data: TrainDataToImport) -> TrainDataImportResult;
     fn all_stations(&self) -> Vec<ImportedStation>;
     fn all_schedules(&self) -> Vec<ImportedSchedule>;
     fn all_trips(&self) -> Vec<ImportedTripLeg>;
@@ -236,20 +250,20 @@ pub trait TrainDataRepository {
     /// Returns [`RemapError::MappingNotFound`] when no mapping exists for
     /// `(source, source_id)`, and [`RemapError::InternalStationNotFound`] when
     /// `new_internal_id` does not refer to a known internal station.
-    fn remap_station(
+    fn update_station_mapping(
         &mut self,
         source: &str,
         source_id: &ImportedStationId,
         new_internal_id: &InternalStationId,
-    ) -> Result<(), RemapError>;
+    ) -> Result<(), RemapStationError>;
     /// Return up to `limit` internal stations whose name contains `query`
     /// (case-insensitive), ordered alphabetically.  Intended for autocomplete.
     fn search_internal_stations_by_name(&self, query: &str, limit: usize) -> Vec<InternalStation>;
 }
 
-/// Application service that aggregates data from various importers, persists it
-/// through a [`StationAndTripRepository`], and exposes a [`Graph`] ready for the
-/// optimisation algorithms in [`crate::domain::optim`].
+/// Application service that aggregates data from various importers, persists it through a
+/// [`TrainDataRepository`], and exposes a [`Graph`] ready for the optimisation algorithms in
+/// [`crate::domain::optim`].
 pub struct ScheduleService<R: TrainDataRepository> {
     repository: Arc<Mutex<R>>,
 }
@@ -269,48 +283,47 @@ impl<R: TrainDataRepository> ScheduleService<R> {
         }
     }
 
-    /// Feed stations, schedules and trips from any importer into the repository.
-    /// Returns a [`TimetableImportResult`] describing which stations are new or changed.
-    pub fn ingest(&mut self, data: TrainDataToImport) -> TimetableImportResult {
+    pub fn ingest(&mut self, data: TrainDataToImport) -> Result<TrainDataImportResult, ()> {
         self.repository
             .lock()
+            .map_err(|_| ())
             .map(|mut repo| repo.import_timetable(data))
-            .unwrap()
     }
 
-    /// Reassign a source station to a different internal station.
+    /// Reassign a [`ImportedStation`] to a different [`InternalStation`].
     ///
-    /// This is the primary way to merge duplicate stations across sources: after
-    /// both have been imported (each with an auto-created internal station), call
-    /// this to point one of the source stations at the other's internal station.
-    /// The now-orphaned internal station can be cleaned up separately if needed.
+    /// Any now-orphaned [`InternalStation`] will be deleted in the process.
     pub fn remap_station(
         &mut self,
         source: &str,
         source_id: &ImportedStationId,
         new_internal_id: &InternalStationId,
-    ) -> Result<(), RemapError> {
+    ) -> Result<(), RemapStationError> {
         self.repository
             .lock()
-            .map(|mut repo| repo.remap_station(source, source_id, new_internal_id))
-            .unwrap()
+            .map_err(|_| RemapStationError::Error)
+            .and_then(|mut repo| repo.update_station_mapping(source, source_id, new_internal_id))
     }
 
-    /// Return up to `limit` internal stations whose name contains `query`
-    /// (case-insensitive), ordered alphabetically.  Intended for autocomplete.
-    pub fn search_stations_by_name(&self, query: &str, limit: usize) -> Vec<InternalStation> {
+    /// Return up to `limit` [`InternalStation`]s whose name contains `query` (case-insensitive),
+    /// ordered alphabetically. Intended for autocomplete.
+    pub fn search_stations_by_name(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<InternalStation>, ()> {
         self.repository
             .lock()
+            .map_err(|_| ())
             .map(|repo| repo.search_internal_stations_by_name(query, limit))
-            .unwrap()
     }
 
     /// Build a [`Graph`] from everything currently held by the repository.
-    pub fn graph(&self) -> Graph {
-        let repo = self.repository.lock().unwrap();
+    pub fn graph(&self) -> Result<Graph, ()> {
+        let repo = self.repository.lock().map_err(|_| ())?;
         let stations = repo.all_stations();
         let trips = repo.all_trips();
-        build_graph(&stations, &trips)
+        Ok(build_graph(&stations, &trips))
     }
 }
 
@@ -355,7 +368,7 @@ pub mod test_utils {
         }
 
         impl TrainDataRepository for TrainDataRepository {
-            fn import_timetable(&mut self, data: TrainDataToImport) -> TimetableImportResult;
+            fn import_timetable(&mut self, data: TrainDataToImport) -> TrainDataImportResult;
             fn all_stations(&self) -> Vec<ImportedStation>;
             fn all_schedules(&self) -> Vec<ImportedSchedule>;
             fn all_trips(&self) -> Vec<ImportedTripLeg>;
@@ -369,12 +382,12 @@ pub mod test_utils {
             /// Returns [`RemapError::MappingNotFound`] when no mapping exists for
             /// `(source, source_id)`, and [`RemapError::InternalStationNotFound`] when
             /// `new_internal_id` does not refer to a known internal station.
-            fn remap_station(
+            fn update_station_mapping(
                 &mut self,
                 source: &str,
                 source_id: &ImportedStationId,
                 new_internal_id: &InternalStationId,
-            ) -> Result<(), RemapError>;
+            ) -> Result<(), RemapStationError>;
             fn search_internal_stations_by_name(&self, query: &str, limit: usize) -> Vec<InternalStation>;
         }
     }
@@ -406,8 +419,8 @@ mod tests {
         ImportedStationId::from(id.to_owned())
     }
 
-    fn empty_result() -> TimetableImportResult {
-        TimetableImportResult {
+    fn empty_result() -> TrainDataImportResult {
+        TrainDataImportResult {
             station_changes: vec![],
             new_internal_stations: vec![],
         }
@@ -444,9 +457,9 @@ mod tests {
         mock.expect_all_trips().return_const(trips);
 
         let mut service = ScheduleService::new(mock);
-        service.ingest(make_importer("source", &["A", "B"]));
+        let _ = service.ingest(make_importer("source", &["A", "B"]));
 
-        let graph = service.graph();
+        let graph = service.graph().expect("should build graph");
         assert_eq!(graph.trips_from(StationId::from(0)).len(), 1);
     }
 
@@ -457,7 +470,7 @@ mod tests {
         mock.expect_all_trips().return_const(vec![]);
 
         let service = ScheduleService::new(mock);
-        let graph = service.graph();
+        let graph = service.graph().expect("should build graph");
         assert_eq!(graph.trips_from(StationId::from(0)).len(), 0);
     }
 
@@ -481,9 +494,9 @@ mod tests {
         mock.expect_all_trips().return_const(trips);
 
         let mut service = ScheduleService::new(mock);
-        service.ingest(make_importer("source", &["A", "B"]));
+        let _ = service.ingest(make_importer("source", &["A", "B"]));
 
-        let graph = service.graph();
+        let graph = service.graph().expect("should build graph");
         assert_eq!(graph.trips_from(StationId::from(0)).len(), 0);
         assert_eq!(graph.trips_from(StationId::from(1)).len(), 0);
     }
@@ -508,9 +521,9 @@ mod tests {
         mock.expect_all_trips().return_const(trips);
 
         let mut service = ScheduleService::new(mock);
-        service.ingest(make_importer("source", &["A", "B"]));
+        let _ = service.ingest(make_importer("source", &["A", "B"]));
 
-        let graph = service.graph();
+        let graph = service.graph().expect("should build graph");
         assert_eq!(graph.trips_from(StationId::from(0)).len(), 0);
     }
 
@@ -531,9 +544,9 @@ mod tests {
         mock.expect_all_trips().return_const(trips);
 
         let mut service = ScheduleService::new(mock);
-        service.ingest(make_importer("source", &["A", "B", "C"]));
+        let _ = service.ingest(make_importer("source", &["A", "B", "C"]));
 
-        let graph = service.graph();
+        let graph = service.graph().expect("should build graph");
         assert_eq!(graph.trips_from(StationId::from(0)).len(), 3);
     }
 
@@ -545,7 +558,7 @@ mod tests {
         let internal_id = InternalStationId::from(1_i64);
 
         let mut mock = MockTrainDataRepository::new();
-        mock.expect_remap_station()
+        mock.expect_update_station_mapping()
             .times(1)
             .returning(|_, _, _| Ok(()));
 
@@ -559,14 +572,14 @@ mod tests {
         let internal_id = InternalStationId::from(1_i64);
 
         let mut mock = MockTrainDataRepository::new();
-        mock.expect_remap_station()
+        mock.expect_update_station_mapping()
             .times(1)
-            .returning(|_, _, _| Err(RemapError::MappingNotFound));
+            .returning(|_, _, _| Err(RemapStationError::MappingNotFound));
 
         let mut service = ScheduleService::new(mock);
         assert_eq!(
             service.remap_station("db", &src, &internal_id),
-            Err(RemapError::MappingNotFound)
+            Err(RemapStationError::MappingNotFound)
         );
     }
 
@@ -576,14 +589,14 @@ mod tests {
         let ghost_internal = InternalStationId::from(99999_i64);
 
         let mut mock = MockTrainDataRepository::new();
-        mock.expect_remap_station()
+        mock.expect_update_station_mapping()
             .times(1)
-            .returning(|_, _, _| Err(RemapError::InternalStationNotFound));
+            .returning(|_, _, _| Err(RemapStationError::InternalStationNotFound));
 
         let mut service = ScheduleService::new(mock);
         assert_eq!(
             service.remap_station("db", &src, &ghost_internal),
-            Err(RemapError::InternalStationNotFound)
+            Err(RemapStationError::InternalStationNotFound)
         );
     }
 
@@ -608,6 +621,9 @@ mod tests {
             .return_once(move |_, _| expected_clone);
 
         let service = ScheduleService::new(mock);
-        assert_eq!(service.search_stations_by_name("paris", 10), expected);
+        assert_eq!(
+            service.search_stations_by_name("paris", 10).unwrap(),
+            expected
+        );
     }
 }

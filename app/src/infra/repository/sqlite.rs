@@ -4,8 +4,8 @@ use rusqlite::{Connection, OptionalExtension, Result, Transaction, params};
 
 use crate::app::schedule::{
     ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation, ImportedStationId,
-    ImportedTripLeg, InternalStation, InternalStationId, RemapError, StationChange, StationMapping,
-    TimetableImportResult, TrainDataRepository, TrainDataToImport,
+    ImportedTripLeg, InternalStation, InternalStationId, RemapStationError, StationChange,
+    StationMapping, TrainDataImportResult, TrainDataRepository, TrainDataToImport,
 };
 
 /// SQLite-backed implementation of [`TrainDataRepository`].
@@ -258,7 +258,7 @@ impl SqliteRepository {
 }
 
 impl TrainDataRepository for SqliteRepository {
-    fn import_timetable(&mut self, data: TrainDataToImport) -> TimetableImportResult {
+    fn import_timetable(&mut self, data: TrainDataToImport) -> TrainDataImportResult {
         let tx = self
             .conn
             .transaction()
@@ -298,7 +298,7 @@ impl TrainDataRepository for SqliteRepository {
             data.trip_legs().len(),
         );
 
-        TimetableImportResult {
+        TrainDataImportResult {
             station_changes,
             new_internal_stations,
         }
@@ -471,12 +471,12 @@ impl TrainDataRepository for SqliteRepository {
         .collect()
     }
 
-    fn remap_station(
+    fn update_station_mapping(
         &mut self,
         source: &str,
         source_id: &ImportedStationId,
         new_internal_id: &InternalStationId,
-    ) -> Result<(), RemapError> {
+    ) -> Result<(), RemapStationError> {
         let tx = self
             .conn
             .transaction()
@@ -493,7 +493,7 @@ impl TrainDataRepository for SqliteRepository {
             > 0;
 
         if !exists {
-            return Err(RemapError::InternalStationNotFound);
+            return Err(RemapStationError::InternalStationNotFound);
         }
 
         // Fetch the current internal_id (and confirm the mapping exists).
@@ -509,7 +509,7 @@ impl TrainDataRepository for SqliteRepository {
 
         let old_internal_id = match old_internal_id {
             Some(id) => id,
-            None => return Err(RemapError::MappingNotFound),
+            None => return Err(RemapStationError::MappingNotFound),
         };
 
         // Update the mapping.
@@ -993,7 +993,7 @@ mod tests {
         let sncf_source_id = ImportedStationId::from("StopArea:OCE87113001".to_owned());
 
         // Merge: point the sncf station at the db internal station.
-        repo.remap_station("sncf", &sncf_source_id, &db_internal)
+        repo.update_station_mapping("sncf", &sncf_source_id, &db_internal)
             .expect("remap should succeed");
 
         let updated = repo.station_mappings();
@@ -1025,7 +1025,7 @@ mod tests {
             .clone();
 
         // Point fr/Y at sncf's internal station (orphans fr's own → deleted).
-        repo.remap_station(
+        repo.update_station_mapping(
             "fr",
             &ImportedStationId::from("Y".to_owned()),
             &sncf_internal,
@@ -1035,7 +1035,7 @@ mod tests {
 
         // Now remap sncf/X → db's internal station.
         // sncf_internal is still referenced by fr/Y, so it must NOT be deleted.
-        repo.remap_station(
+        repo.update_station_mapping(
             "sncf",
             &ImportedStationId::from("X".to_owned()),
             &db_internal,
@@ -1054,9 +1054,9 @@ mod tests {
         let unknown_source_id = ImportedStationId::from("nonexistent".to_owned());
 
         let err = repo
-            .remap_station("db", &unknown_source_id, &valid_id)
+            .update_station_mapping("db", &unknown_source_id, &valid_id)
             .unwrap_err();
-        assert_eq!(err, RemapError::MappingNotFound);
+        assert_eq!(err, RemapStationError::MappingNotFound);
     }
 
     #[test]
@@ -1067,8 +1067,10 @@ mod tests {
         let source_id = ImportedStationId::from("A".to_owned());
         let ghost_id = InternalStationId::from(99999_i64);
 
-        let err = repo.remap_station("db", &source_id, &ghost_id).unwrap_err();
-        assert_eq!(err, RemapError::InternalStationNotFound);
+        let err = repo
+            .update_station_mapping("db", &source_id, &ghost_id)
+            .unwrap_err();
+        assert_eq!(err, RemapStationError::InternalStationNotFound);
     }
 
     // ---- search_internal_stations_by_name ----

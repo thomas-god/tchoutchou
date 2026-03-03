@@ -36,7 +36,9 @@ pub async fn autocomplete_station(
     State(state): State<AppState>,
     Query(QueryParameters { substring }): Query<QueryParameters>,
 ) -> Result<Json<AutocompleteStationResponse>, StatusCode> {
-    let stations = state.schedule.search_stations_by_name(&substring, 10);
+    let Ok(stations) = state.schedule.search_stations_by_name(&substring, 10) else {
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    };
     Ok(Json(AutocompleteStationResponse {
         stations: stations
             .into_iter()
