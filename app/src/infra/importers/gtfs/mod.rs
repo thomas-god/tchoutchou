@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use derive_more::{Constructor, From};
 
+pub mod fetcher;
 pub mod importer;
 pub mod parsers;
 
