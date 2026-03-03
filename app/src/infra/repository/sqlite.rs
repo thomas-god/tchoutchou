@@ -75,7 +75,7 @@ impl SqliteRepository {
                 date        TEXT NOT NULL,
                 PRIMARY KEY (schedule_id, date)
             );
-            CREATE INDEX idx_schedule_dates_date ON schedule_dates (date);
+            CREATE INDEX IF NOT EXISTS idx_schedule_dates_date ON schedule_dates (date);
 
             CREATE TABLE IF NOT EXISTS trips (
                 source      TEXT    NOT NULL,
