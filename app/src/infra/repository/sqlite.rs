@@ -3,9 +3,10 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::{Connection, OptionalExtension, Result, Transaction, params};
 
 use crate::app::schedule::{
-    ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation, ImportedStationId,
-    ImportedTripLeg, InternalStation, InternalStationId, RemapStationError, StationChange,
-    StationMapping, TrainDataImportResult, TrainDataRepository, TrainDataToImport,
+    EnrichedInternalStation, ImportedRouteId, ImportedSchedule, ImportedScheduleId,
+    ImportedStation, ImportedStationId, ImportedStationRef, ImportedTripLeg, InternalStation,
+    InternalStationId, RemapStationError, StationChange, StationMapping, TrainDataImportResult,
+    TrainDataRepository, TrainDataToImport,
 };
 
 /// SQLite-backed implementation of [`TrainDataRepository`].
@@ -479,6 +480,68 @@ impl TrainDataRepository for SqliteRepository {
 
         tx.commit().expect("remap_station: commit failed");
         Ok(())
+    }
+
+    fn all_internal_stations_enriched(&self) -> Vec<EnrichedInternalStation> {
+        // Load every internal station in one query.
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, lat, lon FROM internal_stations")
+            .expect("all_internal_stations_enriched: prepare failed");
+
+        let all: Vec<InternalStation> = stmt
+            .query_map([], |row| {
+                let id: i64 = row.get(0)?;
+                let name: String = row.get(1)?;
+                let lat: f64 = row.get(2)?;
+                let lon: f64 = row.get(3)?;
+                Ok(InternalStation::new(
+                    InternalStationId::from(id),
+                    name,
+                    lat,
+                    lon,
+                ))
+            })
+            .expect("all_internal_stations_enriched: query failed")
+            .map(|r| r.expect("all_internal_stations_enriched: row mapping failed"))
+            .collect();
+
+        // Bulk-load all imported-station references grouped by internal_id.
+        let mut sources_by_internal: HashMap<i64, Vec<ImportedStationRef>> = HashMap::new();
+        {
+            let mut src_stmt = self
+                .conn
+                .prepare(
+                    "SELECT sm.internal_id, sm.source, sm.source_id, s.name
+                     FROM station_mappings sm
+                     JOIN stations s ON s.id = sm.source_id AND s.source = sm.source",
+                )
+                .expect("all_internal_stations_enriched: sources prepare failed");
+            src_stmt
+                .query_map([], |row| {
+                    let internal_id: i64 = row.get(0)?;
+                    let source: String = row.get(1)?;
+                    let source_id: String = row.get(2)?;
+                    let name: String = row.get(3)?;
+                    Ok((internal_id, source, source_id, name))
+                })
+                .expect("all_internal_stations_enriched: sources query failed")
+                .map(|r| r.expect("all_internal_stations_enriched: sources row failed"))
+                .for_each(|(internal_id, source, source_id, name)| {
+                    sources_by_internal.entry(internal_id).or_default().push(
+                        ImportedStationRef::new(source, ImportedStationId::from(source_id), name),
+                    );
+                });
+        }
+
+        all.into_iter()
+            .map(|station| {
+                let children = sources_by_internal
+                    .remove(&station.id().as_i64())
+                    .unwrap_or_default();
+                EnrichedInternalStation::new(station, children)
+            })
+            .collect()
     }
 }
 
@@ -1324,5 +1387,107 @@ mod tests {
             repo.search_internal_stations_by_name("Paris", 10)
                 .is_empty()
         );
+    }
+
+    // ---- all_internal_stations_enriched ----
+
+    fn geo_station(id: &str, name: &str, lat: f64, lon: f64) -> ImportedStation {
+        ImportedStation::new(
+            ImportedStationId::from(id.to_owned()),
+            name.to_owned(),
+            lat,
+            lon,
+        )
+    }
+
+    fn import_geo(
+        repo: &mut SqliteRepository,
+        id: &str,
+        name: &str,
+        lat: f64,
+        lon: f64,
+        source: &str,
+    ) {
+        repo.import_timetable(data_to_import(
+            vec![geo_station(id, name, lat, lon)],
+            vec![],
+            vec![],
+            source,
+        ));
+    }
+
+    #[test]
+    fn all_internal_stations_enriched_empty_repository_returns_empty() {
+        let repo = make_repo();
+        assert!(repo.all_internal_stations_enriched().is_empty());
+    }
+
+    #[test]
+    fn all_internal_stations_enriched_single_station_with_one_child() {
+        let mut repo = make_repo();
+        import_geo(&mut repo, "A", "Station A", 48.0, 2.0, "sncf");
+
+        let enriched = repo.all_internal_stations_enriched();
+        assert_eq!(enriched.len(), 1);
+        assert_eq!(enriched[0].children().len(), 1);
+        assert_eq!(enriched[0].children()[0].source, "sncf");
+    }
+
+    #[test]
+    fn all_internal_stations_enriched_merged_station_has_two_children() {
+        let mut repo = make_repo();
+        // Import two sources; each gets its own internal station initially.
+        import_geo(&mut repo, "A", "Station A", 48.0, 2.0, "sncf");
+        import_geo(&mut repo, "B", "Station B", 48.0, 2.0, "db");
+
+        // Merge: point db/B at sncf's internal station.
+        let mappings = repo.station_mappings();
+        let sncf_internal = mappings
+            .iter()
+            .find(|m| m.source == "sncf")
+            .unwrap()
+            .internal_id
+            .clone();
+        repo.update_station_mapping(
+            "db",
+            &ImportedStationId::from("B".to_owned()),
+            &sncf_internal,
+        )
+        .expect("remap should succeed");
+
+        let enriched = repo.all_internal_stations_enriched();
+        // Only one internal station should remain after the merge.
+        assert_eq!(enriched.len(), 1);
+        assert_eq!(enriched[0].children().len(), 2);
+        let sources: Vec<&str> = enriched[0]
+            .children()
+            .iter()
+            .map(|c| c.source.as_str())
+            .collect();
+        assert!(sources.contains(&"sncf"));
+        assert!(sources.contains(&"db"));
+    }
+
+    #[test]
+    fn all_internal_stations_enriched_independent_stations_have_separate_children() {
+        let mut repo = make_repo();
+        import_geo(&mut repo, "A", "Station A", 0.0, 0.0, "sncf");
+        import_geo(&mut repo, "B", "Station B", 1.0, 1.0, "db");
+
+        let enriched = repo.all_internal_stations_enriched();
+        assert_eq!(enriched.len(), 2);
+        for e in &enriched {
+            assert_eq!(
+                e.children().len(),
+                1,
+                "each independent station has one child"
+            );
+        }
+        let sources: Vec<&str> = enriched
+            .iter()
+            .map(|e| e.children()[0].source.as_str())
+            .collect();
+        assert!(sources.contains(&"sncf"));
+        assert!(sources.contains(&"db"));
     }
 }

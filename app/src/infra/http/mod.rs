@@ -14,7 +14,7 @@ use crate::{
     app::schedule::ScheduleService,
     infra::{
         config::Config,
-        http::handlers::{autocomplete_station, get_destinations},
+        http::handlers::{autocomplete_station, get_destinations, get_merge_candidates},
         repository::sqlite::SqliteRepository,
     },
 };
@@ -83,5 +83,6 @@ impl HttpServer {
 fn routes() -> Router<AppState> {
     Router::new()
         .route("/stations/autocomplete", get(autocomplete_station))
+        .route("/stations/nearby", get(get_merge_candidates))
         .route("/destinations", get(get_destinations))
 }

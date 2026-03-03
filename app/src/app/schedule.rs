@@ -199,6 +199,80 @@ impl InternalStation {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+// `Enriched*` are not directly exposed to the end-user, but are used to give admin-user context
+// when deciding to update the mapping of [`ImportedStation`]s to [`InternalStation`]s.
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+/// An [`InternalStation`] enriched with the imported stations mapped to it.
+#[derive(Debug, Clone, PartialEq, Constructor)]
+pub struct EnrichedInternalStation {
+    station: InternalStation,
+    children: Vec<ImportedStationRef>,
+}
+
+impl EnrichedInternalStation {
+    pub fn id(&self) -> &InternalStationId {
+        self.station.id()
+    }
+    pub fn name(&self) -> &str {
+        self.station.name()
+    }
+    pub fn lat(&self) -> f64 {
+        self.station.lat()
+    }
+    pub fn lon(&self) -> f64 {
+        self.station.lon()
+    }
+    pub fn children(&self) -> &[ImportedStationRef] {
+        &self.children
+    }
+}
+
+/// A reference to an imported station mapped to an [`InternalStation`], capturing the data source
+/// and the original name as ingested. Useful as context when deciding whether two internal stations
+/// should be merged.
+#[derive(Debug, Clone, PartialEq, Constructor)]
+pub struct ImportedStationRef {
+    pub source: String,
+    pub source_id: ImportedStationId,
+    pub name: String,
+}
+
+/// A candidate for merging with a given [`InternalStation`], together with the haversine distance
+/// between them in kilometres.
+#[derive(Debug, Clone, PartialEq, Constructor)]
+pub struct MergeCandidate {
+    station: EnrichedInternalStation,
+    distance_km: f64,
+}
+
+impl MergeCandidate {
+    pub fn station(&self) -> &EnrichedInternalStation {
+        &self.station
+    }
+    pub fn distance_km(&self) -> f64 {
+        self.distance_km
+    }
+}
+
+/// An [`InternalStation`] paired with all nearby stations that could represent the same physical
+/// stop (merge candidates), sorted by ascending distance.
+#[derive(Debug, Clone, PartialEq, Constructor)]
+pub struct StationMergeCandidates {
+    station: EnrichedInternalStation,
+    candidates: Vec<MergeCandidate>,
+}
+
+impl StationMergeCandidates {
+    pub fn station(&self) -> &EnrichedInternalStation {
+        &self.station
+    }
+    pub fn candidates(&self) -> &[MergeCandidate] {
+        &self.candidates
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 // `ScheduleService` related types.
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -266,6 +340,9 @@ pub trait TrainDataRepository {
     /// Return up to `limit` internal stations whose name contains `query`
     /// (case-insensitive), ordered alphabetically. Intended for autocomplete.
     fn search_internal_stations_by_name(&self, query: &str, limit: usize) -> Vec<InternalStation>;
+
+    /// Return all internal stations, each enriched with the imported station(s) mapped to it.
+    fn all_internal_stations_enriched(&self) -> Vec<EnrichedInternalStation>;
 }
 
 /// Application service that aggregates data from various importers, persists it through a
@@ -325,6 +402,50 @@ impl<R: TrainDataRepository> ScheduleService<R> {
             .map(|repo| repo.search_internal_stations_by_name(query, limit))
     }
 
+    /// Return all [`InternalStation`]s that have at least one neighbour within `max_distance_km`
+    /// (haversine), each paired with its sorted candidate list. Stations with no nearby match
+    /// are omitted. Intended for bulk merge-candidate discovery.
+    pub fn find_all_merge_candidates(
+        &self,
+        max_distance_km: f64,
+    ) -> Result<Vec<StationMergeCandidates>, ()> {
+        let all = self
+            .repository
+            .lock()
+            .map_err(|_| ())?
+            .all_internal_stations_enriched();
+
+        Ok(all
+            .iter()
+            .filter_map(|station| {
+                let mut candidates: Vec<MergeCandidate> = all
+                    .iter()
+                    .filter(|other| other.id() != station.id())
+                    .filter_map(|other| {
+                        let d =
+                            haversine_km(station.lat(), station.lon(), other.lat(), other.lon());
+                        if d <= max_distance_km {
+                            Some(MergeCandidate::new(other.clone(), d))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if candidates.is_empty() {
+                    return None;
+                }
+
+                candidates.sort_by(|a, b| {
+                    a.distance_km()
+                        .partial_cmp(&b.distance_km())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                Some(StationMergeCandidates::new(station.clone(), candidates))
+            })
+            .collect())
+    }
+
     /// Build a [`Graph`] from trips active on `date` (format `YYYYMMDD`).
     ///
     /// [`ImportedStation`]s are  resolved to their canonical [`InternalStationId`] so that
@@ -369,6 +490,17 @@ fn build_graph(trips: &[ImportedTripLeg], mappings: &[StationMapping]) -> Graph 
     Graph::new(trips_by_nodes)
 }
 
+/// Haversine great-circle distance in kilometres between two (lat, lon) points in decimal degrees.
+fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    const R: f64 = 6_371.0;
+    let dlat = (lat2 - lat1).to_radians();
+    let dlon = (lon2 - lon1).to_radians();
+    let lat1 = lat1.to_radians();
+    let lat2 = lat2.to_radians();
+    let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
+    2.0 * R * a.sqrt().asin()
+}
+
 #[cfg(test)]
 pub mod test_utils {
     use mockall::mock;
@@ -393,6 +525,7 @@ pub mod test_utils {
                 new_internal_id: &InternalStationId,
             ) -> Result<(), RemapStationError>;
             fn search_internal_stations_by_name(&self, query: &str, limit: usize) -> Vec<InternalStation>;
+            fn all_internal_stations_enriched(&self) -> Vec<EnrichedInternalStation>;
         }
     }
 }
@@ -689,5 +822,124 @@ mod tests {
             service.search_stations_by_name("paris", 10).unwrap(),
             expected
         );
+    }
+
+    // ---- find_all_merge_candidates ----
+
+    fn enriched(id: i64, name: &str, lat: f64, lon: f64) -> EnrichedInternalStation {
+        EnrichedInternalStation::new(
+            InternalStation::new(InternalStationId::from(id), name.to_owned(), lat, lon),
+            vec![],
+        )
+    }
+
+    fn enriched_with_child(
+        id: i64,
+        name: &str,
+        lat: f64,
+        lon: f64,
+        source: &str,
+        source_id: &str,
+    ) -> EnrichedInternalStation {
+        EnrichedInternalStation::new(
+            InternalStation::new(InternalStationId::from(id), name.to_owned(), lat, lon),
+            vec![ImportedStationRef::new(
+                source.to_owned(),
+                ImportedStationId::from(source_id.to_owned()),
+                name.to_owned(),
+            )],
+        )
+    }
+
+    #[test]
+    fn merge_candidates_empty_stations_returns_empty() {
+        let mut mock = MockTrainDataRepository::new();
+        mock.expect_all_internal_stations_enriched()
+            .return_once(|| vec![]);
+
+        let service = ScheduleService::new(mock);
+        assert!(service.find_all_merge_candidates(100.0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn merge_candidates_no_pair_within_threshold_returns_empty() {
+        let mut mock = MockTrainDataRepository::new();
+        mock.expect_all_internal_stations_enriched()
+            .return_once(|| vec![enriched(1, "A", 0.0, 0.0), enriched(2, "B", 10.0, 10.0)]);
+
+        let service = ScheduleService::new(mock);
+        assert!(service.find_all_merge_candidates(1.0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn merge_candidates_close_pair_appears_as_mutual_candidates() {
+        // At the equator, 0.001° lon ≈ 0.11 km.
+        let mut mock = MockTrainDataRepository::new();
+        mock.expect_all_internal_stations_enriched()
+            .return_once(|| vec![enriched(1, "A", 0.0, 0.0), enriched(2, "B", 0.0, 0.001)]);
+
+        let service = ScheduleService::new(mock);
+        let result = service.find_all_merge_candidates(1.0).unwrap();
+
+        let names: Vec<&str> = result.iter().map(|g| g.station().name()).collect();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"A"));
+        assert!(names.contains(&"B"));
+
+        let group_a = result.iter().find(|g| g.station().name() == "A").unwrap();
+        assert_eq!(group_a.candidates().len(), 1);
+        assert_eq!(group_a.candidates()[0].station().name(), "B");
+    }
+
+    #[test]
+    fn merge_candidates_sorted_by_distance_ascending() {
+        // At the equator: B ≈ 0.11 km, C ≈ 0.56 km from A.
+        let mut mock = MockTrainDataRepository::new();
+        mock.expect_all_internal_stations_enriched()
+            .return_once(|| {
+                vec![
+                    enriched(1, "A", 0.0, 0.0),
+                    enriched(2, "B", 0.0, 0.001),
+                    enriched(3, "C", 0.0, 0.005),
+                ]
+            });
+
+        let service = ScheduleService::new(mock);
+        let result = service.find_all_merge_candidates(10.0).unwrap();
+        let group_a = result.iter().find(|g| g.station().name() == "A").unwrap();
+        let cand_names: Vec<&str> = group_a
+            .candidates()
+            .iter()
+            .map(|c| c.station().name())
+            .collect();
+        assert_eq!(
+            cand_names,
+            ["B", "C"],
+            "candidates must be sorted ascending"
+        );
+    }
+
+    #[test]
+    fn merge_candidates_children_forwarded_from_enriched_station() {
+        let mut mock = MockTrainDataRepository::new();
+        mock.expect_all_internal_stations_enriched()
+            .return_once(|| {
+                vec![
+                    enriched_with_child(1, "A", 0.0, 0.0, "sncf", "sncf-a"),
+                    enriched_with_child(2, "B", 0.0, 0.001, "db", "db-b"),
+                ]
+            });
+
+        let service = ScheduleService::new(mock);
+        let result = service.find_all_merge_candidates(1.0).unwrap();
+
+        let group_a = result.iter().find(|g| g.station().name() == "A").unwrap();
+        assert_eq!(group_a.station().children().len(), 1);
+        assert_eq!(group_a.station().children()[0].source, "sncf");
+
+        let cand = &group_a.candidates()[0];
+        assert_eq!(cand.station().name(), "B");
+        assert_eq!(cand.station().children().len(), 1);
+        assert_eq!(cand.station().children()[0].source, "db");
     }
 }
