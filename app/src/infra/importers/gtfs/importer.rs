@@ -120,23 +120,29 @@ impl GTFSImporter {
 ///
 /// Rows where `location_type == Station` become the station entries (holding
 /// name and coordinates). Rows where `location_type == Stop` are attached to
-/// their `parent_station`.
+/// their `parent_station`. Stops with no `parent_station` are treated as
+/// standalone stations (with themselves as their only child stop) so that
+/// trip legs referencing them are not silently dropped.
 fn build_stations(stops: &[GTFSStop]) -> Vec<GTFSStation> {
     // Map: parent station id → child stop ids.
     let mut children: HashMap<&str, Vec<GTFSStopId>> = HashMap::new();
+    let mut orphan_stops: Vec<&GTFSStop> = vec![];
     for stop in stops
         .iter()
         .filter(|s| s.location_type() == GTFSLocationType::Stop)
     {
-        if let Some(parent) = stop.parent_station() {
-            children
-                .entry(parent.as_str())
-                .or_default()
-                .push(stop.id().clone());
+        match stop.parent_station() {
+            Some(parent) => {
+                children
+                    .entry(parent.as_str())
+                    .or_default()
+                    .push(stop.id().clone());
+            }
+            None => orphan_stops.push(stop),
         }
     }
 
-    stops
+    let mut stations: Vec<GTFSStation> = stops
         .iter()
         .filter(|s| s.location_type() == GTFSLocationType::Station)
         .map(|s| {
@@ -149,7 +155,21 @@ fn build_stations(stops: &[GTFSStop]) -> Vec<GTFSStation> {
                 platform_stops,
             )
         })
-        .collect()
+        .collect();
+
+    // Parentless stops become their own station so they remain reachable
+    // during trip reconciliation.
+    for stop in orphan_stops {
+        stations.push(GTFSStation::new(
+            GTFSStationId::from(stop.id().as_str().to_owned()),
+            stop.name().to_owned(),
+            stop.lat(),
+            stop.lon(),
+            vec![stop.id().clone()],
+        ));
+    }
+
+    stations
 }
 
 /// Expands flat stop-time rows into all (origin → destination) `GTFSTripLeg` pairs.
@@ -470,7 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_rows_without_parent_are_not_exposed_as_stations() {
+    fn stop_rows_without_parent_are_exposed_as_standalone_stations() {
         let parser = StubParser {
             stops: vec![
                 station("S1", "Paris Nord"),
@@ -489,9 +509,52 @@ mod tests {
             calendar_dates: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
-        let result = data.stations();
-        assert_eq!(result.len(), 1);
+        let mut result = data.stations().to_vec();
+        result.sort_by_key(|s| s.id().clone());
+        assert_eq!(result.len(), 2);
         assert_eq!(result[0].id(), &ImportedStationId::from("S1".to_owned()));
+        assert_eq!(
+            result[1].id(),
+            &ImportedStationId::from("orphan".to_owned())
+        );
+    }
+
+    #[test]
+    fn orphan_stop_is_reachable_in_trips() {
+        // An orphan stop (no parent_station) that appears in stop_times should
+        // produce a valid trip leg, not be silently dropped.
+        let parser = StubParser {
+            stops: vec![
+                station("S1", "Paris Nord"),
+                stop("S1-A", "S1"),
+                GTFSStop::new(
+                    sid("orphan"),
+                    "Orphan".to_owned(),
+                    0.0,
+                    0.0,
+                    GTFSLocationType::Stop,
+                    None,
+                ),
+            ],
+            stop_times: vec![
+                stop_time("T1", "S1-A", 0, 800, 0),
+                stop_time("T1", "orphan", 1200, 0, 1),
+            ],
+            trips: vec![trip("T1", "R1", "SVC1")],
+            calendar: vec![],
+            calendar_dates: vec![],
+        };
+        let data = GTFSImporter::from_parser(&parser, "source").as_data();
+        let result = data.trip_legs();
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].origin(),
+            &ImportedStationId::from("S1".to_owned())
+        );
+        assert_eq!(
+            result[0].destination(),
+            &ImportedStationId::from("orphan".to_owned())
+        );
     }
 
     // ── trips ────────────────────────────────────────────────────────────────

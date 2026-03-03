@@ -28,7 +28,7 @@ impl CalendarDatesParser {
         let mut exception_type = None;
 
         for (idx, col) in first_row.split(',').enumerate() {
-            match col {
+            match col.trim() {
                 "service_id" => service_id = Some(idx),
                 "date" => date = Some(idx),
                 "exception_type" => exception_type = Some(idx),

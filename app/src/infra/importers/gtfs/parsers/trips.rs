@@ -26,7 +26,7 @@ impl TripsFileParser {
         let mut service_id = None;
 
         for (idx, col) in first_row.split(',').enumerate() {
-            match col {
+            match col.trim() {
                 "trip_id" => trip_id = Some(idx),
                 "route_id" => route_id = Some(idx),
                 "service_id" => service_id = Some(idx),

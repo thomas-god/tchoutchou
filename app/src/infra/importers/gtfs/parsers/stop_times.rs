@@ -30,7 +30,7 @@ impl StopTimesParser {
         let mut stop_sequence = None;
 
         for (idx, col) in first_row.split(',').enumerate() {
-            match col {
+            match col.trim() {
                 "trip_id" => trip_id = Some(idx),
                 "arrival_time" => arrival_time = Some(idx),
                 "departure_time" => departure_time = Some(idx),

@@ -34,7 +34,7 @@ impl StopsParser {
         let mut parent_station = None;
 
         for (idx, col) in first_row.split(',').enumerate() {
-            match col {
+            match col.trim() {
                 "stop_id" => id = Some(idx),
                 "stop_name" => name = Some(idx),
                 "stop_lat" => lat = Some(idx),
