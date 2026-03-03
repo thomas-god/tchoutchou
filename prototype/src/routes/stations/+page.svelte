@@ -101,7 +101,7 @@
 					km
 				</p>
 				<div class="flex flex-col gap-2">
-					{#each groups as group (group.id)}
+					{#each groups.toSorted((a, b) => a.name.localeCompare(b.name)) as group (group.id)}
 						<div class="collapse-arrow collapse border border-base-300 bg-base-100">
 							<input type="checkbox" />
 							<div class="collapse-title flex items-center gap-3">
