@@ -13,7 +13,9 @@ use tower_http::cors::CorsLayer;
 use crate::{
     app::schedule::ScheduleService,
     infra::{
-        config::Config, http::handlers::autocomplete_station, repository::sqlite::SqliteRepository,
+        config::Config,
+        http::handlers::{autocomplete_station, get_destinations},
+        repository::sqlite::SqliteRepository,
     },
 };
 
@@ -79,5 +81,7 @@ impl HttpServer {
 }
 
 fn routes() -> Router<AppState> {
-    Router::new().route("/stations/autocomplete", get(autocomplete_station))
+    Router::new()
+        .route("/stations/autocomplete", get(autocomplete_station))
+        .route("/destinations", get(get_destinations))
 }

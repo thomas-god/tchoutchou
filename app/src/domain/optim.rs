@@ -5,6 +5,12 @@ use derive_more::{Constructor, From};
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, From)]
 pub struct StationId(i64);
 
+impl StationId {
+    pub fn as_i64(self) -> i64 {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Constructor)]
 pub struct Trip {
     origin: StationId,
@@ -76,6 +82,18 @@ impl PartialEq for Destination {
 impl Eq for Destination {}
 
 impl Destination {
+    pub fn station_id(&self) -> i64 {
+        self.station.as_i64()
+    }
+
+    pub fn duration(&self) -> usize {
+        self.duration
+    }
+
+    pub fn connections_count(&self) -> usize {
+        self.trips.len()
+    }
+
     fn new(station: StationId, trips: Vec<Trip>) -> Self {
         let arrival = trips
             .iter()
