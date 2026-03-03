@@ -6,7 +6,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    app::schedule::{ImportedStationRef, InternalStation, MergeCandidate, StationMergeCandidates},
+    app::schedule::{
+        ImportedStationId, ImportedStationRef, InternalStation, InternalStationId, MergeCandidate,
+        RemapStationError, StationMergeCandidates,
+    },
     domain::optim::{DestinationFilters, StationId, find_destinations},
     infra::http::AppState,
 };
@@ -203,4 +206,38 @@ pub async fn get_merge_candidates(
     Ok(Json(MergeCandidatesResponse {
         stations: groups.into_iter().map(MergeCandidateGroup::from).collect(),
     }))
+}
+
+// --- remap station ---
+
+#[derive(Debug, Deserialize)]
+pub struct RemapStationRequest {
+    source: String,
+    source_id: String,
+    internal_id: i64,
+}
+
+/// `PATCH /api/stations/mapping`
+///
+/// Reassigns an imported station (identified by `source` + `source_id`) to a
+/// different internal station (`internal_id`).
+///
+/// Returns `204 No Content` on success, `404 Not Found` when either the mapping
+/// or the target internal station does not exist, and `500` on an internal error.
+pub async fn remap_station(
+    State(mut state): State<AppState>,
+    Json(body): Json<RemapStationRequest>,
+) -> StatusCode {
+    let source_id = ImportedStationId::from(body.source_id);
+    let internal_id = InternalStationId::from(body.internal_id);
+    match state
+        .schedule
+        .remap_station(&body.source, &source_id, &internal_id)
+    {
+        Ok(()) => StatusCode::NO_CONTENT,
+        Err(RemapStationError::MappingNotFound | RemapStationError::InternalStationNotFound) => {
+            StatusCode::NOT_FOUND
+        }
+        Err(RemapStationError::Error) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }

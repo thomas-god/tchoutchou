@@ -5,7 +5,7 @@ use axum::{
         HeaderValue, Method,
         header::{CONTENT_TYPE, COOKIE, SET_COOKIE},
     },
-    routing::get,
+    routing::{get, patch},
 };
 use tokio::net;
 use tower_http::cors::CorsLayer;
@@ -14,7 +14,9 @@ use crate::{
     app::schedule::ScheduleService,
     infra::{
         config::Config,
-        http::handlers::{autocomplete_station, get_destinations, get_merge_candidates},
+        http::handlers::{
+            autocomplete_station, get_destinations, get_merge_candidates, remap_station,
+        },
         repository::sqlite::SqliteRepository,
     },
 };
@@ -84,5 +86,6 @@ fn routes() -> Router<AppState> {
     Router::new()
         .route("/stations/autocomplete", get(autocomplete_station))
         .route("/stations/nearby", get(get_merge_candidates))
+        .route("/stations/mapping", patch(remap_station))
         .route("/destinations", get(get_destinations))
 }
