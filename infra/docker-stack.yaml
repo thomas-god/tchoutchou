@@ -41,6 +41,7 @@ services:
       VITE_DATABASE_PATH: /data/tchoutchou.db
       VITE_DESTINATIONS_DATABASE_PATH: /data/nodes.db
       VITE_DATA_PATH: /data
+      BACKEND_URL: http://tchoutchou-api:3001
 
     networks:
       - traefik-public
