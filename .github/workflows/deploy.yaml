@@ -2,7 +2,7 @@ name: Deploy app
 
 on:
   workflow_run:
-    workflows: ['Build image']
+    workflows: ['Build images']
     types:
       - completed
 
