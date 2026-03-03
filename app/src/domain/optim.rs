@@ -3,7 +3,7 @@ use std::{cmp::Ordering, collections::HashMap};
 use derive_more::{Constructor, From};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, From)]
-pub struct StationId(usize);
+pub struct StationId(i64);
 
 #[derive(Debug, Clone, PartialEq, Constructor)]
 pub struct Trip {

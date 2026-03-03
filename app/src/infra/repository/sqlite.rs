@@ -322,28 +322,6 @@ impl TrainDataRepository for SqliteRepository {
             new_internal_stations,
         }
     }
-    fn all_stations(&self) -> Vec<ImportedStation> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, name, lat, lon FROM stations")
-            .expect("all_stations: prepare failed");
-
-        stmt.query_map([], |row| {
-            let id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            let lat: f64 = row.get(2)?;
-            let lon: f64 = row.get(3)?;
-            Ok(ImportedStation::new(
-                ImportedStationId::from(id),
-                name,
-                lat,
-                lon,
-            ))
-        })
-        .expect("all_stations: query failed")
-        .map(|r| r.expect("all_stations: row mapping failed"))
-        .collect()
-    }
 
     fn trips_for_date(&self, date: &str) -> Vec<ImportedTripLeg> {
         let mut stmt = self
@@ -508,6 +486,29 @@ impl TrainDataRepository for SqliteRepository {
 /// [`TrainDataRepository`] contract but are required to verify the implementation.
 #[cfg(test)]
 impl SqliteRepository {
+    fn all_stations(&self) -> Vec<ImportedStation> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, lat, lon FROM stations")
+            .expect("all_stations: prepare failed");
+
+        stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            let lat: f64 = row.get(2)?;
+            let lon: f64 = row.get(3)?;
+            Ok(ImportedStation::new(
+                ImportedStationId::from(id),
+                name,
+                lat,
+                lon,
+            ))
+        })
+        .expect("all_stations: query failed")
+        .map(|r| r.expect("all_stations: row mapping failed"))
+        .collect()
+    }
+
     fn all_schedules(&self) -> Vec<ImportedSchedule> {
         // LEFT JOIN so that schedules with no dates still appear (with a NULL date).
         let mut stmt = self
