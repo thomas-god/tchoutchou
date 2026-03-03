@@ -1,4 +1,30 @@
 services:
+  tchoutchou-api:
+    image: ghcr.io/thomas-god/tchoutchou-app:main
+    labels:
+      - 'traefik.enable=true'
+
+      - 'traefik.http.services.tchoutchou-api.loadbalancer.server.port=3001'
+      - 'traefik.http.routers.tchoutchou-api.rule=Host(`train.trackforge.fr`) && PathPrefix(`/api`)'
+      - 'traefik.http.routers.tchoutchou-api.entrypoints=websecure'
+      - 'traefik.http.routers.tchoutchou-api.tls.certresolver=myresolver'
+
+      - 'traefik.docker.network=traefik-public'
+    environment:
+      SERVER_PORT: 3001
+      ALLOW_ORIGIN: https://train.trackforge.fr
+      DATA_LOCATION: /data
+
+    networks:
+      - traefik-public
+
+    volumes:
+      - tchoutchou_data:/data
+
+    deploy:
+      update_config:
+        order: start-first
+
   tchoutchou:
     image: ghcr.io/thomas-god/tchoutchou-proto:main
     labels:
