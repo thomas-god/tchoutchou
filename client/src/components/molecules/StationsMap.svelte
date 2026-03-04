@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import leaflet from 'leaflet';
+	import 'leaflet.markercluster';
+	import 'leaflet.markercluster/dist/MarkerCluster.css';
+	import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 	import '@geoman-io/leaflet-geoman-free';
 	import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 	import type { Node } from '$lib/api/schedule';
@@ -47,16 +50,11 @@
 		}
 	});
 
-	const icon = leaflet.divIcon({
-		html: `
-			  <img src="/icons/station.svg" alt="Train station" class="w-3 h-3"/>
-			`
-	});
-	let markersLayer = new leaflet.LayerGroup();
+	let markersLayer = (leaflet as any).markerClusterGroup({ chunkedLoading: true });
 	let markers = $derived(
 		stations.map((station) => ({
 			id: station.id,
-			marker: leaflet.marker([station.lat, station.lon], { icon }).bindPopup(`${station.name}`)
+			marker: leaflet.circleMarker([station.lat, station.lon]).bindPopup(`${station.name}`)
 		}))
 	);
 
