@@ -44,25 +44,26 @@ const remapStationSchema = z.object({
  * Reassign a single imported station to a different internal station.
  * Corresponds to PATCH /api/stations/mapping on the Rust backend.
  */
-export const remapStation = command(remapStationSchema, async ({ source, source_id, internal_id }) => {
-	const backendUrl = getEnv('BACKEND_URL');
-	const res = await fetch(`${backendUrl}/api/stations/mapping`, {
-		method: 'PATCH',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ source, source_id, internal_id })
-	});
-	if (!res.ok) {
-		throw new Error(`Remap failed: ${res.status}`);
+export const remapStation = command(
+	remapStationSchema,
+	async ({ source, source_id, internal_id }) => {
+		const backendUrl = getEnv('BACKEND_URL');
+		const res = await fetch(`${backendUrl}/api/stations/mapping`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ source, source_id, internal_id })
+		});
+		if (!res.ok) {
+			throw new Error(`Remap failed: ${res.status}`);
+		}
 	}
-});
+);
 
 export const fetchMergeCandidates = query(
 	z.object({ maxDistanceKm: z.number() }),
 	async ({ maxDistanceKm }): Promise<MergeCandidateGroup[]> => {
 		const backendUrl = getEnv('BACKEND_URL');
-		const res = await fetch(
-			`${backendUrl}/api/stations/nearby?max_distance_km=${maxDistanceKm}`
-		);
+		const res = await fetch(`${backendUrl}/api/stations/nearby?max_distance_km=${maxDistanceKm}`);
 		if (!res.ok) {
 			throw new Error(`Failed to fetch merge candidates: ${res.status}`);
 		}

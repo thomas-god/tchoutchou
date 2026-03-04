@@ -2,6 +2,9 @@
 	import { displayDuration } from '$lib';
 	import { onDestroy } from 'svelte';
 	import leaflet from 'leaflet';
+	import 'leaflet.markercluster';
+	import 'leaflet.markercluster/dist/MarkerCluster.css';
+	import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 	import type {
 		BackendDestinationResult,
 		BackendStation
@@ -19,17 +22,12 @@
 	let mapElement: HTMLDivElement;
 	let map: any = $state(undefined);
 
-	const icon = leaflet.divIcon({
-		html: `
-			  <img src="/icons/station.svg" alt="Train station" class="w-3.5 h-3.5"/>
-			`
-	});
-	let markersLayer = new leaflet.LayerGroup();
+	let markersLayer = (leaflet as any).markerClusterGroup({ chunkedLoading: true });
 	let markers = $derived(
 		destinations.map((destination) => ({
 			id: destination.station.id,
 			marker: leaflet
-				.marker([destination.station.lat, destination.station.lon], { icon })
+				.circleMarker([destination.station.lat, destination.station.lon])
 				.bindPopup(
 					`${destination.station.name} (${displayDuration(destination.duration)}, ${destination.connections} correspondance(s))`
 				)
