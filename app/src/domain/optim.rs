@@ -91,7 +91,7 @@ impl Destination {
     }
 
     pub fn connections_count(&self) -> usize {
-        self.trips.len()
+        self.trips.len() - 1
     }
 
     fn new(station: StationId, trips: Vec<Trip>) -> Self {
