@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 use derive_more::{Constructor, From};
@@ -198,6 +199,29 @@ impl InternalStation {
     }
 }
 
+#[derive(Debug, Clone, Constructor, PartialEq, PartialOrd, Eq, Ord)]
+pub struct InternalTripLeg {
+    origin: ImportedStationId,
+    destination: ImportedStationId,
+    departure: usize,
+    arrival: usize,
+}
+
+impl InternalTripLeg {
+    pub fn origin(&self) -> &ImportedStationId {
+        &self.origin
+    }
+    pub fn destination(&self) -> &ImportedStationId {
+        &self.destination
+    }
+    pub fn departure(&self) -> usize {
+        self.departure
+    }
+    pub fn arrival(&self) -> usize {
+        self.arrival
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // `Enriched*` are not directly exposed to the end-user, but are used to give admin-user context
 // when deciding to update the mapping of [`ImportedStation`]s to [`InternalStation`]s.
@@ -320,7 +344,7 @@ pub trait TrainDataRepository {
 
     /// Return only the trips whose route runs on `date` (format `YYYYMMDD`).
     /// Filtering is done at the persistence layer for efficiency.
-    fn trips_for_date(&self, date: &str) -> Vec<ImportedTripLeg>;
+    fn trips_for_date(&self, date: &str) -> Vec<InternalTripLeg>;
 
     /// Return all source-to-internal station mappings.
     fn station_mappings(&self) -> Vec<StationMapping>;
@@ -467,9 +491,14 @@ impl<R: TrainDataRepository> ScheduleService<R> {
     /// [`ImportedStation`]s are  resolved to their canonical [`InternalStationId`] so that
     /// connections to the same physical station are shared across providers.
     pub fn graph(&self, date: &str) -> Result<Graph, ()> {
+        println!("Loading graph for date {:?}", date);
+        let start = Instant::now();
         let repo = self.repository.lock().map_err(|_| ())?;
         let trips = repo.trips_for_date(date);
+        println!("loaded {:?} trips", trips.len(),);
         let mappings = repo.station_mappings();
+        println!("loaded {:?} mappings", mappings.len());
+        println!("elapsed: {:?}", start.elapsed());
         Ok(build_graph(&trips, &mappings))
     }
 }
@@ -480,7 +509,7 @@ impl<R: TrainDataRepository> ScheduleService<R> {
 /// so that two providers whose stations share the same internal station are connected in the
 /// resulting graph. Each [`StationId`] directly mirrors the corresponding [`InternalStationId`]
 /// value.
-fn build_graph(trips: &[ImportedTripLeg], mappings: &[StationMapping]) -> Graph {
+fn build_graph(trips: &[InternalTripLeg], mappings: &[StationMapping]) -> Graph {
     // 1. ImportedStationId → InternalStationId from station mappings.
     let imported_to_internal: HashMap<&ImportedStationId, &InternalStationId> = mappings
         .iter()
@@ -543,7 +572,7 @@ pub mod test_utils {
 
         impl TrainDataRepository for TrainDataRepository {
             fn import_timetable(&mut self, data: TrainDataToImport) -> TrainDataImportResult;
-            fn trips_for_date(&self, date: &str) -> Vec<ImportedTripLeg>;
+            fn trips_for_date(&self, date: &str) -> Vec<InternalTripLeg>;
             fn station_mappings(&self) -> Vec<StationMapping>;
             fn update_station_mapping(
                 &mut self,
@@ -575,10 +604,6 @@ mod tests {
             0.0,
             0.0,
         )
-    }
-
-    fn route(id: &str) -> ImportedRouteId {
-        ImportedRouteId::from(id.to_owned())
     }
 
     fn sid(id: &str) -> ImportedStationId {
@@ -615,13 +640,7 @@ mod tests {
     #[test]
     fn ingest_builds_graph() {
         // trips_for_date returns already-filtered trips
-        let trips = vec![ImportedTripLeg::new(
-            route("R1"),
-            sid("A"),
-            sid("B"),
-            100,
-            200,
-        )];
+        let trips = vec![InternalTripLeg::new(sid("A"), sid("B"), 100, 200)];
         let mappings = vec![smapping("A", 1), smapping("B", 2)];
 
         let mut mock = MockTrainDataRepository::new();
@@ -656,13 +675,7 @@ mod tests {
     #[test]
     fn trip_with_unknown_origin_is_skipped() {
         // "X" has no station mapping; the trip is active but unmappable
-        let trips = vec![ImportedTripLeg::new(
-            route("R1"),
-            sid("X"),
-            sid("B"),
-            100,
-            200,
-        )];
+        let trips = vec![InternalTripLeg::new(sid("X"), sid("B"), 100, 200)];
         let mappings = vec![smapping("A", 1), smapping("B", 2)];
 
         let mut mock = MockTrainDataRepository::new();
@@ -685,13 +698,7 @@ mod tests {
     #[test]
     fn trip_with_unknown_destination_is_skipped() {
         // "X" has no station mapping; the trip is active but unmappable
-        let trips = vec![ImportedTripLeg::new(
-            route("R1"),
-            sid("A"),
-            sid("X"),
-            100,
-            200,
-        )];
+        let trips = vec![InternalTripLeg::new(sid("A"), sid("X"), 100, 200)];
         let mappings = vec![smapping("A", 1), smapping("B", 2)];
 
         let mut mock = MockTrainDataRepository::new();
@@ -713,9 +720,9 @@ mod tests {
     #[test]
     fn multiple_trips_from_same_origin_are_all_indexed() {
         let trips = vec![
-            ImportedTripLeg::new(route("R1"), sid("A"), sid("B"), 100, 200),
-            ImportedTripLeg::new(route("R1"), sid("A"), sid("C"), 300, 400),
-            ImportedTripLeg::new(route("R1"), sid("A"), sid("B"), 500, 600),
+            InternalTripLeg::new(sid("A"), sid("B"), 100, 200),
+            InternalTripLeg::new(sid("A"), sid("C"), 300, 400),
+            InternalTripLeg::new(sid("A"), sid("B"), 500, 600),
         ];
         // A→internal(1)=StationId(1), B→internal(2)=StationId(2), C→internal(3)=StationId(3)
         let mappings = vec![smapping("A", 1), smapping("B", 2), smapping("C", 3)];
@@ -742,8 +749,8 @@ mod tests {
         // both map to the same internal station (id=1).
         // trips_for_date already returns only trips active on TEST_DATE
         let trips = vec![
-            ImportedTripLeg::new(route("R-DB"), sid("A-db"), sid("B"), 100, 200),
-            ImportedTripLeg::new(route("R-SNCF"), sid("A-sncf"), sid("B"), 300, 400),
+            InternalTripLeg::new(sid("A-db"), sid("B"), 100, 200),
+            InternalTripLeg::new(sid("A-sncf"), sid("B"), 300, 400),
         ];
         // A-db and A-sncf share internal station 1; B is internal station 2.
         let mappings = vec![

@@ -12,7 +12,6 @@
 
 	let stop: { id: number; name: string } | undefined = $state(undefined);
 	let from: string = $state(format(today));
-	$inspect(from);
 
 	// Station autocomplete state
 	let query = $state('');

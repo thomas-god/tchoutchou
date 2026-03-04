@@ -5,8 +5,8 @@ use rusqlite::{Connection, OptionalExtension, Result, Transaction, params};
 use crate::app::schedule::{
     EnrichedInternalStation, ImportedRouteId, ImportedSchedule, ImportedScheduleId,
     ImportedStation, ImportedStationId, ImportedStationRef, ImportedTripLeg, InternalStation,
-    InternalStationId, RemapStationError, StationChange, StationMapping, TrainDataImportResult,
-    TrainDataRepository, TrainDataToImport,
+    InternalStationId, InternalTripLeg, RemapStationError, StationChange, StationMapping,
+    TrainDataImportResult, TrainDataRepository, TrainDataToImport,
 };
 
 /// SQLite-backed implementation of [`TrainDataRepository`].
@@ -33,7 +33,12 @@ impl SqliteRepository {
 
     fn from_connection(conn: Connection) -> Result<Self> {
         // SQLite disables FK enforcement by default; turn it on for every connection.
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        conn.execute_batch(
+            "
+            PRAGMA foreign_keys = ON;
+            PRAGMA optimize;
+        ",
+        )?;
         let repo = Self { conn };
         repo.init_schema()?;
         Ok(repo)
@@ -76,7 +81,7 @@ impl SqliteRepository {
                 date        TEXT NOT NULL,
                 PRIMARY KEY (schedule_id, date)
             );
-            CREATE INDEX IF NOT EXISTS idx_schedule_dates_date ON schedule_dates (date);
+            CREATE INDEX IF NOT EXISTS idx_schedule_dates_date ON schedule_dates (date, schedule_id, source);
 
             CREATE TABLE IF NOT EXISTS trips (
                 source      TEXT    NOT NULL,
@@ -85,8 +90,10 @@ impl SqliteRepository {
                 origin      TEXT    NOT NULL,
                 destination TEXT    NOT NULL,
                 departure   INTEGER NOT NULL,
-                arrival     INTEGER NOT NULL
+                arrival     INTEGER NOT NULL,
+                UNIQUE (source, origin, destination, departure, arrival) ON CONFLICT IGNORE
             );
+            CREATE INDEX IF NOT EXISTS idx_trips_source_route ON trips (source, route);
 
             CREATE TABLE IF NOT EXISTS route_schedules (
                 source      TEXT NOT NULL,
@@ -94,6 +101,9 @@ impl SqliteRepository {
                 schedule_id TEXT NOT NULL,
                 PRIMARY KEY (source, route_id, schedule_id)
             );
+            CREATE INDEX IF NOT EXISTS idx_route_schedules ON route_schedules (schedule_id, source, route_id);
+
+            PRAGMA optimize;
             ",
         )
     }
@@ -309,6 +319,7 @@ impl TrainDataRepository for SqliteRepository {
         }
 
         tx.commit().expect("import_timetable: commit failed");
+        let _ = self.conn.execute_batch("PRAGMA optimize;");
         println!(
             "import_timetable: {} stations ({} changes, {} new internal), {} schedules, {} trips",
             data.stations().len(),
@@ -324,11 +335,11 @@ impl TrainDataRepository for SqliteRepository {
         }
     }
 
-    fn trips_for_date(&self, date: &str) -> Vec<ImportedTripLeg> {
+    fn trips_for_date(&self, date: &str) -> Vec<InternalTripLeg> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT DISTINCT t.route, t.origin, t.destination, t.departure, t.arrival
+                "SELECT DISTINCT t.origin, t.destination, t.departure, t.arrival
                  FROM trips t
                  JOIN route_schedules rs ON rs.route_id = t.route AND rs.source = t.source
                  JOIN schedule_dates sd ON sd.schedule_id = rs.schedule_id
@@ -337,13 +348,11 @@ impl TrainDataRepository for SqliteRepository {
             .expect("trips_for_date: prepare failed");
 
         stmt.query_map(params![date], |row| {
-            let route: String = row.get(0)?;
-            let origin: String = row.get(1)?;
-            let destination: String = row.get(2)?;
-            let departure: i64 = row.get(3)?;
-            let arrival: i64 = row.get(4)?;
-            Ok(ImportedTripLeg::new(
-                ImportedRouteId::from(route),
+            let origin: String = row.get(0)?;
+            let destination: String = row.get(1)?;
+            let departure: i64 = row.get(2)?;
+            let arrival: i64 = row.get(3)?;
+            Ok(InternalTripLeg::new(
                 ImportedStationId::from(origin),
                 ImportedStationId::from(destination),
                 departure as usize,
@@ -733,7 +742,14 @@ mod tests {
             arr,
         )
     }
-
+    fn internal_trip(from: &str, to: &str, dep: usize, arr: usize) -> InternalTripLeg {
+        InternalTripLeg::new(
+            ImportedStationId::from(from.to_owned()),
+            ImportedStationId::from(to.to_owned()),
+            dep,
+            arr,
+        )
+    }
     fn data_to_import(
         stations: Vec<ImportedStation>,
         schedules: Vec<ImportedSchedule>,
@@ -1030,6 +1046,44 @@ mod tests {
         assert_eq!(result, expected);
     }
 
+    // ---- unique constraint on trips ----
+
+    #[test]
+    fn duplicate_trip_is_silently_ignored() {
+        let mut repo = make_repo();
+        let t = trip("R1", "A", "B", 100, 200);
+        // Import the same trip twice (same origin, destination, departure, arrival).
+        repo.import_timetable(data_to_import(
+            vec![station("A"), station("B")],
+            vec![],
+            vec![t.clone(), t.clone()],
+            "source",
+        ));
+        // The ON CONFLICT IGNORE clause must silently drop the duplicate.
+        assert_eq!(repo.all_trips().len(), 1);
+    }
+
+    #[test]
+    fn same_trip_across_two_sources_is_not_deduplicated() {
+        let mut repo = make_repo();
+        let t = trip("R1", "A", "B", 100, 200);
+        repo.import_timetable(data_to_import(
+            vec![station("A"), station("B")],
+            vec![],
+            vec![t.clone()],
+            "source",
+        ));
+        // A second import for a different source still carries the same
+        // (origin, destination, departure, arrival) tuple.
+        repo.import_timetable(data_to_import(
+            vec![station("A"), station("B")],
+            vec![],
+            vec![t.clone()],
+            "other",
+        ));
+        assert_eq!(repo.all_trips().len(), 2);
+    }
+
     // ---- trips_for_date ----
 
     /// Build a [`TrainDataToImport`] where every trip comes with an explicit
@@ -1062,7 +1116,7 @@ mod tests {
             "source",
         ));
         let result = repo.trips_for_date("20260303");
-        assert_eq!(result, vec![t]);
+        assert_eq!(result, vec![internal_trip("A", "B", 100, 200)]);
     }
 
     #[test]
