@@ -26,7 +26,7 @@ services:
         order: start-first
 
   tchoutchou:
-    image: ghcr.io/thomas-god/tchoutchou-proto:main
+    image: ghcr.io/thomas-god/tchoutchou-client:main
     labels:
       - 'traefik.enable=true'
 

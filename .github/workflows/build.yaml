@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  build-proto-docker-image:
+  build-client-docker-image:
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Set up Docker Buildx
@@ -22,13 +22,13 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: '{{defaultContext}}:prototype'
+          context: '{{defaultContext}}:client'
           file: ./Dockerfile
           platforms: linux/arm64
           push: true
           tags: |
-            ghcr.io/thomas-god/tchoutchou-proto:main
-            ghcr.io/thomas-god/tchoutchou-proto:${{ github.sha }}
+            ghcr.io/thomas-god/tchoutchou-client:main
+            ghcr.io/thomas-god/tchoutchou-client:${{ github.sha }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new
 

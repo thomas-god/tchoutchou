@@ -1,0 +1,45 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Server",
+      "type": "shell",
+      "command": "cargo run; fish",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "dev",
+        "close": false
+      }
+    },
+    {
+      "label": "Run Client",
+      "type": "shell",
+      "command": "nvm use 22 && npm run dev; fish",
+      "options": {
+        "cwd": "${workspaceFolder}/client"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "dev",
+        "close": false
+      }
+    },
+    {
+      "label": "Start Dev Environment",
+      "dependsOn": [
+        "Run Server",
+        "Run Client"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}
