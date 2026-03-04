@@ -70,3 +70,30 @@ export const fetchMergeCandidates = query(
 		return mergeCandidatesResponseSchema.parse(data).stations;
 	}
 );
+
+const stationItemSchema = z.object({
+	id: z.number(),
+	name: z.string(),
+	lat: z.number(),
+	lon: z.number()
+});
+
+const allStationsResponseSchema = z.object({
+	stations: z.array(stationItemSchema)
+});
+
+export type StationItem = z.infer<typeof stationItemSchema>;
+
+/**
+ * Fetch the full list of internal stations (id, name, lat, lon) from the Rust backend.
+ * Corresponds to GET /api/stations.
+ */
+export const fetchAllStations = query(async (): Promise<StationItem[]> => {
+	const backendUrl = getEnv('BACKEND_URL');
+	const res = await fetch(`${backendUrl}/api/stations`);
+	if (!res.ok) {
+		throw new Error(`Failed to fetch stations: ${res.status}`);
+	}
+	const data = await res.json();
+	return allStationsResponseSchema.parse(data).stations;
+});
