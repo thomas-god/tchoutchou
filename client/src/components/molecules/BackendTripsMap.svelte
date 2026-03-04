@@ -23,6 +23,9 @@
 	let map: any = $state(undefined);
 
 	let markersLayer = (leaflet as any).markerClusterGroup({ chunkedLoading: true });
+	let highlightLayer = leaflet.layerGroup();
+	let previouslyHighlighted: any = undefined;
+
 	let markers = $derived(
 		destinations.map((destination) => ({
 			id: destination.station.id,
@@ -35,10 +38,28 @@
 	);
 
 	$effect(() => {
+		if (map === undefined) return;
+
+		// Restore previously highlighted marker back to the cluster
+		if (previouslyHighlighted !== undefined) {
+			highlightLayer.removeLayer(previouslyHighlighted);
+			markersLayer.addLayer(previouslyHighlighted);
+			previouslyHighlighted = undefined;
+		}
+
 		if (selectedDestination !== undefined) {
-			const marker = markers.find((marker) => marker.id === selectedDestination!.station.id);
-			if (marker !== undefined) {
-				marker.marker.openPopup();
+			const entry = markers.find((m) => m.id === selectedDestination!.station.id);
+			if (entry !== undefined) {
+				// Move the marker out of the cluster so it renders individually
+				markersLayer.removeLayer(entry.marker);
+				highlightLayer.addLayer(entry.marker);
+				previouslyHighlighted = entry.marker;
+
+				map.flyTo([selectedDestination.station.lat, selectedDestination.station.lon], 8, {
+					duration: 0.6,
+					animate: true
+				});
+				entry.marker.openPopup();
 			}
 		}
 	});
@@ -53,6 +74,7 @@
 				})
 				.addTo(map);
 			map.addLayer(markersLayer);
+			map.addLayer(highlightLayer);
 		}
 
 		markersLayer.clearLayers();
