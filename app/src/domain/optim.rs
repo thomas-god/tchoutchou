@@ -44,7 +44,7 @@ pub struct DestinationFilters {
 impl Default for DestinationFilters {
     fn default() -> Self {
         Self {
-            max_connections: 2,
+            max_connections: 1,
             min_connection_duration: 900,
             max_duration: 3600 * 12,
         }
@@ -350,10 +350,10 @@ mod test_find_destinations {
     fn test_find_destinations_multiple_connections() {
         let origin = StationId::from(1);
         let graph = graph_with_2_connections();
+        let filters = DestinationFilters::new(2, 900, 12 * 3600);
 
-        let destinations = find_destinations(&origin, &graph, &DestinationFilters::default());
+        let destinations = find_destinations(&origin, &graph, &filters);
 
-        // assert_eq!(destinations.len(), 3);
         assert_eq!(
             destinations,
             vec![
