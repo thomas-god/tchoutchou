@@ -14,6 +14,46 @@ use crate::{
     infra::http::AppState,
 };
 
+// --- list all stations ---
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct StationItem {
+    id: i64,
+    name: String,
+    lat: f64,
+    lon: f64,
+}
+
+impl From<InternalStation> for StationItem {
+    fn from(s: InternalStation) -> Self {
+        Self {
+            id: s.id().as_i64(),
+            name: s.name().to_string(),
+            lat: s.lat(),
+            lon: s.lon(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct AllStationsResponse {
+    pub stations: Vec<StationItem>,
+}
+
+/// `GET /api/stations`
+///
+/// Returns every internal station with its id, name, latitude and longitude.
+pub async fn get_all_stations(
+    State(state): State<AppState>,
+) -> Result<Json<AllStationsResponse>, StatusCode> {
+    let Ok(stations) = state.schedule.list_all_stations() else {
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    };
+    Ok(Json(AllStationsResponse {
+        stations: stations.into_iter().map(StationItem::from).collect(),
+    }))
+}
+
 #[derive(Deserialize)]
 pub struct QueryParameters {
     substring: String,

@@ -402,6 +402,17 @@ impl<R: TrainDataRepository> ScheduleService<R> {
             .map(|repo| repo.search_internal_stations_by_name(query, limit))
     }
 
+    pub fn list_all_stations(&self) -> Result<Vec<InternalStation>, ()> {
+        Ok(self
+            .repository
+            .lock()
+            .map_err(|_| ())?
+            .all_internal_stations_enriched()
+            .into_iter()
+            .map(|e| InternalStation::new(e.id().clone(), e.name().to_string(), e.lat(), e.lon()))
+            .collect())
+    }
+
     /// Return all [`InternalStation`]s that have at least one neighbour within `max_distance_km`
     /// (haversine), each paired with its sorted candidate list. Stations with no nearby match
     /// are omitted. Intended for bulk merge-candidate discovery.

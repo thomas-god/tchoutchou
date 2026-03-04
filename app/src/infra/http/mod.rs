@@ -15,7 +15,8 @@ use crate::{
     infra::{
         config::Config,
         http::handlers::{
-            autocomplete_station, get_destinations, get_merge_candidates, remap_station,
+            autocomplete_station, get_all_stations, get_destinations, get_merge_candidates,
+            remap_station,
         },
         repository::sqlite::SqliteRepository,
     },
@@ -84,6 +85,7 @@ impl HttpServer {
 
 fn routes() -> Router<AppState> {
     Router::new()
+        .route("/stations", get(get_all_stations))
         .route("/stations/autocomplete", get(autocomplete_station))
         .route("/stations/nearby", get(get_merge_candidates))
         .route("/stations/mapping", patch(remap_station))
