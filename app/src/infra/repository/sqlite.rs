@@ -94,6 +94,7 @@ impl SqliteRepository {
                 UNIQUE (source, origin, destination, departure, arrival) ON CONFLICT IGNORE
             );
             CREATE INDEX IF NOT EXISTS idx_trips_source_route ON trips (source, route);
+            CREATE INDEX IF NOT EXISTS idx_trips_route_source ON trips (route, source);
 
             CREATE TABLE IF NOT EXISTS route_schedules (
                 source      TEXT NOT NULL,
@@ -338,12 +339,16 @@ impl TrainDataRepository for SqliteRepository {
     fn trips_for_date(&self, date: &str) -> Vec<InternalTripLeg> {
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT DISTINCT t.origin, t.destination, t.departure, t.arrival
+            .prepare_cached(
+                "WITH active_routes AS (
+                     SELECT DISTINCT rs.source, rs.route_id
+                     FROM schedule_dates sd
+                     JOIN route_schedules rs ON rs.schedule_id = sd.schedule_id
+                     WHERE sd.date = ?1
+                 )
+                 SELECT t.origin, t.destination, t.departure, t.arrival
                  FROM trips t
-                 JOIN route_schedules rs ON rs.route_id = t.route AND rs.source = t.source
-                 JOIN schedule_dates sd ON sd.schedule_id = rs.schedule_id
-                 WHERE sd.date = ?1",
+                 JOIN active_routes ar ON ar.route_id = t.route AND ar.source = t.source",
             )
             .expect("trips_for_date: prepare failed");
 
