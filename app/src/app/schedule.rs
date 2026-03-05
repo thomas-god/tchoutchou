@@ -374,12 +374,16 @@ pub trait TrainDataRepository {
 /// [`crate::domain::optim`].
 pub struct ScheduleService<R: TrainDataRepository> {
     repository: Arc<Mutex<R>>,
+    /// Keyed by date string (`YYYYMMDD`). Values are reference-counted so callers receive a
+    /// cheap handle (`Arc<Graph>`) without deep-cloning the graph. Invalidated on ingest.
+    graph_cache: Arc<Mutex<HashMap<String, Arc<Graph>>>>,
 }
 
 impl<R: TrainDataRepository> Clone for ScheduleService<R> {
     fn clone(&self) -> Self {
         Self {
             repository: self.repository.clone(),
+            graph_cache: self.graph_cache.clone(),
         }
     }
 }
@@ -388,14 +392,18 @@ impl<R: TrainDataRepository> ScheduleService<R> {
     pub fn new(repository: R) -> Self {
         Self {
             repository: Arc::new(Mutex::new(repository)),
+            graph_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub fn ingest(&mut self, data: TrainDataToImport) -> Result<TrainDataImportResult, ()> {
-        self.repository
+        let result = self
+            .repository
             .lock()
             .map_err(|_| ())
-            .map(|mut repo| repo.import_timetable(data))
+            .map(|mut repo| repo.import_timetable(data))?;
+        self.graph_cache.lock().map_err(|_| ())?.clear();
+        Ok(result)
     }
 
     /// Reassign a [`ImportedStation`] to a different [`InternalStation`].
@@ -488,19 +496,40 @@ impl<R: TrainDataRepository> ScheduleService<R> {
 
     /// Build a [`Graph`] from trips active on `date` (format `YYYYMMDD`).
     ///
-    /// [`ImportedStation`]s are  resolved to their canonical [`InternalStationId`] so that
+    /// [`ImportedStation`]s are resolved to their canonical [`InternalStationId`] so that
     /// connections to the same physical station are shared across providers.
-    pub fn graph(&self, date: &str) -> Result<Graph, ()> {
+    ///
+    /// The result is an [`Arc`] into the internal cache. Repeated calls for the same date return
+    /// a new handle to the same allocation — no graph data is ever copied.
+    pub fn graph(&self, date: &str) -> Result<Arc<Graph>, ()> {
+        // Fast path: return a cached handle without touching the repository.
+        {
+            let cache = self.graph_cache.lock().map_err(|_| ())?;
+            if let Some(graph) = cache.get(date) {
+                return Ok(Arc::clone(graph));
+            }
+        }
+
+        // Cache miss: load from the repository, then populate the cache.
         let start = Instant::now();
-        let repo = self.repository.lock().map_err(|_| ())?;
-        let trips = repo.trips_for_date(date);
-        let mappings = repo.station_mappings();
-        tracing::info!(
-            duration = format!("{:?}", start.elapsed()),
-            date,
-            "Graph loaded"
-        );
-        Ok(build_graph(&trips, &mappings))
+        let graph = {
+            let repo = self.repository.lock().map_err(|_| ())?;
+            let trips = repo.trips_for_date(date);
+            let mappings = repo.station_mappings();
+            tracing::info!(
+                duration = format!("{:?}", start.elapsed()),
+                date,
+                "Graph loaded"
+            );
+            Arc::new(build_graph(&trips, &mappings))
+        };
+
+        self.graph_cache
+            .lock()
+            .map_err(|_| ())?
+            .insert(date.to_owned(), Arc::clone(&graph));
+
+        Ok(graph)
     }
 }
 
@@ -1046,5 +1075,73 @@ mod tests {
         assert_eq!(cand.station().name(), "B");
         assert_eq!(cand.station().children().len(), 1);
         assert_eq!(cand.station().children()[0].source, "db");
+    }
+
+    // ---- graph cache ----
+
+    #[test]
+    fn graph_hits_repository_only_once_for_same_date() {
+        let trips = vec![InternalTripLeg::new(sid("A"), sid("B"), 100, 200)];
+        let mappings = vec![smapping("A", 1), smapping("B", 2)];
+
+        let mut mock = MockTrainDataRepository::new();
+        // trips_for_date and station_mappings must each be called exactly once despite
+        // two graph() calls for the same date.
+        mock.expect_trips_for_date()
+            .withf(|d| d == TEST_DATE)
+            .times(1)
+            .return_const(trips);
+        mock.expect_station_mappings()
+            .times(1)
+            .return_const(mappings);
+
+        let service = ScheduleService::new(mock);
+        let g1 = service.graph(TEST_DATE).expect("first call");
+        let g2 = service.graph(TEST_DATE).expect("second call (cached)");
+        assert_eq!(
+            g1.trips_from(StationId::from(1)).len(),
+            g2.trips_from(StationId::from(1)).len()
+        );
+    }
+
+    #[test]
+    fn ingest_invalidates_graph_cache() {
+        let trips_before = vec![InternalTripLeg::new(sid("A"), sid("B"), 100, 200)];
+        let trips_after = vec![];
+        let mappings = vec![smapping("A", 1), smapping("B", 2)];
+
+        let mut mock = MockTrainDataRepository::new();
+        mock.expect_import_timetable()
+            .times(1)
+            .returning(|_| empty_result());
+        // trips_for_date is called twice: once before ingest (cache miss) and once
+        // after ingest (cache invalidated, so another miss).
+        mock.expect_trips_for_date()
+            .withf(|d| d == TEST_DATE)
+            .times(2)
+            .returning({
+                let mut call = 0usize;
+                move |_| {
+                    call += 1;
+                    if call == 1 {
+                        trips_before.clone()
+                    } else {
+                        trips_after.clone()
+                    }
+                }
+            });
+        mock.expect_station_mappings()
+            .times(2)
+            .return_const(mappings);
+
+        let mut service = ScheduleService::new(mock);
+
+        let g_before = service.graph(TEST_DATE).expect("before ingest");
+        assert_eq!(g_before.trips_from(StationId::from(1)).len(), 1);
+
+        let _ = service.ingest(make_importer("source", &["A", "B"]));
+
+        let g_after = service.graph(TEST_DATE).expect("after ingest");
+        assert_eq!(g_after.trips_from(StationId::from(1)).len(), 0);
     }
 }
