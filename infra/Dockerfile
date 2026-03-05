@@ -11,12 +11,12 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY app/Cargo.toml app/Cargo.toml
 RUN mkdir -p app/src && echo "fn main() {}" > app/src/main.rs
-RUN cargo build --release --locked
+RUN cargo build --release --locked --bin app
 RUN rm app/src/main.rs
 
 # Build the real binary
 COPY app/src app/src
-RUN touch app/src/main.rs && cargo build --release --locked
+RUN touch app/src/main.rs && cargo build --release --locked --bin app
 
 FROM debian:bookworm-slim
 
