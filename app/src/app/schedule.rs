@@ -491,14 +491,15 @@ impl<R: TrainDataRepository> ScheduleService<R> {
     /// [`ImportedStation`]s are  resolved to their canonical [`InternalStationId`] so that
     /// connections to the same physical station are shared across providers.
     pub fn graph(&self, date: &str) -> Result<Graph, ()> {
-        println!("Loading graph for date {:?}", date);
         let start = Instant::now();
         let repo = self.repository.lock().map_err(|_| ())?;
         let trips = repo.trips_for_date(date);
-        println!("loaded {:?} trips", trips.len(),);
         let mappings = repo.station_mappings();
-        println!("loaded {:?} mappings", mappings.len());
-        println!("elapsed: {:?}", start.elapsed());
+        tracing::info!(
+            duration = format!("{:?}", start.elapsed()),
+            date,
+            "Graph loaded"
+        );
         Ok(build_graph(&trips, &mappings))
     }
 }
