@@ -29,6 +29,8 @@ type Task = Arc<dyn Fn() -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Se
 struct RegisteredJob {
     name: String,
     task: Task,
+    /// How long after [`DAILY_RUN_TIME`] this job should run.
+    offset: Duration,
 }
 
 // ── Builder ────────────────────────────────────────────────────────────────────────────────────
@@ -48,7 +50,7 @@ impl CronServiceBuilder {
 
         // SNCF import
         let svc = schedule_service.clone();
-        service.register("sncf", move || {
+        service.register("sncf", Duration::ZERO, move || {
             let mut svc = svc.clone();
             async move {
                 let archive = GTFSFetcher::fetch(
@@ -71,7 +73,7 @@ impl CronServiceBuilder {
 
         // DB (Deutsche Bahn) import
         let svc = schedule_service.clone();
-        service.register("db", move || {
+        service.register("db", Duration::ZERO, move || {
             let mut svc = svc.clone();
             async move {
                 let archive =
@@ -92,8 +94,8 @@ impl CronServiceBuilder {
         });
 
         // Renfe import
-        let svc = schedule_service;
-        service.register("renfe", move || {
+        let svc = schedule_service.clone();
+        service.register("renfe", Duration::ZERO, move || {
             let mut svc = svc.clone();
             async move {
                 let archive = GTFSFetcher::fetch(
@@ -113,6 +115,20 @@ impl CronServiceBuilder {
                 Ok(())
             }
         });
+
+        // Explicitely warm graph cache for today
+        let svc = schedule_service;
+        service.register("warm-cache", Duration::from_mins(5), move || {
+            let svc = svc.clone();
+            async move {
+                let _ = svc
+                    .graph(&format!("{}", Utc::now().format("%Y%m%d")))
+                    .map_err(|_| anyhow::anyhow!("warming graph cache"))?;
+
+                Ok(())
+            }
+        });
+
         service
     }
 }
@@ -171,7 +187,7 @@ impl CronService {
         }
     }
 
-    fn register<F, Fut>(&mut self, name: impl Into<String>, task: F)
+    fn register<F, Fut>(&mut self, name: impl Into<String>, offset: Duration, task: F)
     where
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
@@ -179,6 +195,7 @@ impl CronService {
         self.jobs.push(RegisteredJob {
             name: name.into(),
             task: Arc::new(move || Box::pin(task())),
+            offset,
         });
     }
 }
@@ -191,7 +208,8 @@ async fn run_job(
     state: Arc<Mutex<HashMap<String, DateTime<Utc>>>>,
     state_path: Arc<PathBuf>,
 ) {
-    let delay = first_run_delay(last_run, Utc::now());
+    let offset = job.offset;
+    let delay = first_run_delay(last_run, Utc::now(), offset);
 
     if delay.is_zero() {
         tracing::info!(job = %job.name, "job is due immediately");
@@ -211,7 +229,7 @@ async fn run_job(
             Ok(()) => {
                 tracing::info!(job = %job.name, "job succeeded");
                 persist_run(&job.name, Utc::now(), &state, &state_path);
-                sleep_until(next_daily_instant()).await;
+                sleep_until(next_daily_instant(offset)).await;
             }
             Err(err) => {
                 tracing::error!(job = %job.name, error = %err, "job failed, retrying in 60 s");
@@ -224,18 +242,28 @@ async fn run_job(
 /// Compute how long to wait before the first execution.
 ///
 /// - Never ran → zero (immediate).
-/// - Last ran before today's 02:00 → zero (overdue).
-/// - Last ran after today's 02:00 → delay until tomorrow's 02:00.
-fn first_run_delay(last_run: Option<DateTime<Utc>>, now: DateTime<Utc>) -> Duration {
+/// - Last ran before today's target time → zero (overdue).
+/// - Last ran after today's target time → delay until tomorrow's target time.
+///
+/// The target time is [`DAILY_RUN_TIME`] plus `offset`.
+fn first_run_delay(
+    last_run: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+    offset: Duration,
+) -> Duration {
     let Some(last) = last_run else {
         return Duration::ZERO;
     };
 
-    let today_at_2 = Utc.from_utc_datetime(&now.date_naive().and_time(DAILY_RUN_TIME));
-    if last >= today_at_2 {
-        // Already ran today – delay until tomorrow's 02:00.
-        let tomorrow_at_2 = today_at_2 + chrono::Duration::days(1);
-        (tomorrow_at_2 - now).to_std().unwrap_or(Duration::ZERO)
+    let chrono_offset = chrono::Duration::from_std(offset).unwrap_or_default();
+    let today_at_target =
+        Utc.from_utc_datetime(&now.date_naive().and_time(DAILY_RUN_TIME)) + chrono_offset;
+    if last >= today_at_target {
+        // Already ran today – delay until tomorrow's target time.
+        let tomorrow_at_target = today_at_target + chrono::Duration::days(1);
+        (tomorrow_at_target - now)
+            .to_std()
+            .unwrap_or(Duration::ZERO)
     } else {
         // Overdue – run immediately.
         Duration::ZERO
@@ -248,10 +276,11 @@ fn today_daily_run() -> DateTime<Utc> {
     Utc.from_utc_datetime(&today.and_time(DAILY_RUN_TIME))
 }
 
-/// The [`Instant`] corresponding to the next occurrence of [`DAILY_RUN_TIME`] (always tomorrow
-/// from the perspective of this call, i.e. at least ~0 s and at most ~24 h away).
-fn next_daily_instant() -> Instant {
-    let next = today_daily_run() + chrono::Duration::days(1);
+/// The [`Instant`] corresponding to the next occurrence of [`DAILY_RUN_TIME`] + `offset`
+/// (always tomorrow from the perspective of this call, i.e. at least ~0 s and at most ~24 h away).
+fn next_daily_instant(offset: Duration) -> Instant {
+    let chrono_offset = chrono::Duration::from_std(offset).unwrap_or_default();
+    let next = today_daily_run() + chrono::Duration::days(1) + chrono_offset;
     let secs_until = (next - Utc::now()).num_seconds().max(0) as u64;
     Instant::now() + Duration::from_secs(secs_until)
 }
@@ -360,21 +389,27 @@ mod tests {
     #[test]
     fn never_ran_runs_immediately() {
         let now = dt("2026-03-03T10:00:00Z");
-        assert_eq!(first_run_delay(None, now), Duration::ZERO);
+        assert_eq!(first_run_delay(None, now, Duration::ZERO), Duration::ZERO);
     }
 
     #[test]
     fn last_ran_yesterday_is_overdue() {
         let now = dt("2026-03-03T10:00:00Z");
         let last = dt("2026-03-02T02:05:00Z");
-        assert_eq!(first_run_delay(Some(last), now), Duration::ZERO);
+        assert_eq!(
+            first_run_delay(Some(last), now, Duration::ZERO),
+            Duration::ZERO
+        );
     }
 
     #[test]
     fn last_ran_before_todays_window_is_overdue() {
         let now = dt("2026-03-03T10:00:00Z");
         let last = dt("2026-03-03T01:00:00Z"); // before 02:00 today
-        assert_eq!(first_run_delay(Some(last), now), Duration::ZERO);
+        assert_eq!(
+            first_run_delay(Some(last), now, Duration::ZERO),
+            Duration::ZERO
+        );
     }
 
     #[test]
@@ -383,8 +418,27 @@ mod tests {
         let last = dt("2026-03-03T02:05:00Z"); // after 02:00 today
         // next run: 2026-03-04T02:00:00Z → 16 hours away
         assert_eq!(
-            first_run_delay(Some(last), now),
+            first_run_delay(Some(last), now, Duration::ZERO),
             Duration::from_secs(16 * 3600)
+        );
+    }
+
+    #[test]
+    fn offset_shifts_target_time() {
+        let now = dt("2026-03-03T10:00:00Z");
+        let offset = Duration::from_secs(5 * 60); // 5 minutes → target 02:05
+        // last ran at 02:03, before the 02:05 target → overdue
+        let last_before = dt("2026-03-03T02:03:00Z");
+        assert_eq!(
+            first_run_delay(Some(last_before), now, offset),
+            Duration::ZERO
+        );
+        // last ran at 02:06, after the 02:05 target → wait until tomorrow 02:05
+        let last_after = dt("2026-03-03T02:06:00Z");
+        // next run: 2026-03-04T02:05:00Z → 16h05m away
+        assert_eq!(
+            first_run_delay(Some(last_after), now, offset),
+            Duration::from_secs(16 * 3600 + 5 * 60)
         );
     }
 }
