@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.102"
+clap = { version = "4", features = ["derive"] }
 axum = { version = "0.8.8", features = ["macros"] }
 chrono = { version = "0.4.44", features = ["serde"] }
 chrono-tz = "0.10"
@@ -20,6 +21,10 @@ tower-http = { version = "0.6.8", features = ["cors", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
 zip = "2"
+
+[[bin]]
+name = "bench_destinations"
+path = "src/bin/bench_destinations.rs"
 
 [dev-dependencies]
 mockall = "0.13"
