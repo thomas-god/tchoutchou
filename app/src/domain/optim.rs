@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, collections::HashMap};
+use std::{cmp::Ordering, collections::HashMap, time::Instant};
 
 use derive_more::{Constructor, From};
 
@@ -109,7 +109,7 @@ impl Destination {
             station,
             current_time: arrival,
             duration: arrival - departure,
-            trips: trips.clone(),
+            trips,
         }
     }
 
@@ -163,6 +163,7 @@ pub fn find_destinations(
     graph: &Graph,
     filters: &DestinationFilters,
 ) -> Vec<Destination> {
+    let start = Instant::now();
     let mut destinations = vec![];
 
     let Some(first_trips) = graph.trips_by_nodes.get(origin) else {
@@ -176,14 +177,26 @@ pub fn find_destinations(
         destinations.push(Destination::new(trip.destination, vec![trip.clone()]));
     }
 
-    remove_duplicate_destinations(find_new_destinations(graph, destinations, filters))
+    let res = remove_duplicate_destinations(find_new_destinations(graph, destinations, filters, 0));
+
+    tracing::info!(
+        duration = format!("{:?}", start.elapsed()),
+        count = res.len(),
+        "Destinations computed"
+    );
+    res
 }
 
 fn find_new_destinations(
     graph: &Graph,
     mut destinations: Vec<Destination>,
     filters: &DestinationFilters,
+    nb_of_connections: usize,
 ) -> Vec<Destination> {
+    if nb_of_connections >= filters.max_connections {
+        return destinations;
+    }
+
     let mut new_destinations = vec![];
 
     for destination in destinations.iter() {
@@ -192,10 +205,17 @@ fn find_new_destinations(
         }
     }
 
+    new_destinations = remove_duplicate_destinations(new_destinations);
+
     if new_destinations.is_empty() {
         destinations
     } else {
-        destinations.extend(find_new_destinations(graph, new_destinations, filters));
+        destinations.extend(find_new_destinations(
+            graph,
+            new_destinations,
+            filters,
+            nb_of_connections + 1,
+        ));
         destinations
     }
 }
