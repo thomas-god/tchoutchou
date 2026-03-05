@@ -6,6 +6,7 @@ use app::{
         config::Config, cron::CronService, http::HttpServer, repository::sqlite::SqliteRepository,
     },
 };
+use chrono::Utc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -21,6 +22,9 @@ async fn main() -> anyhow::Result<()> {
             .expect("data_location is not valid UTF-8"),
     )?;
     let schedule_service = ScheduleService::new(repo);
+    let _ = schedule_service
+        .graph(&format!("{}", Utc::now().format("%Y%m%d")))
+        .expect("unable to warm graph cache");
 
     let cron =
         CronService::builder(data_location.join("cron-state.txt")).build(schedule_service.clone());
