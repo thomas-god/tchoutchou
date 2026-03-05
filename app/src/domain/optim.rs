@@ -1,4 +1,8 @@
-use std::{cmp::Ordering, collections::HashMap, time::Instant};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, hash_map::Entry},
+    time::Instant,
+};
 
 use derive_more::{Constructor, From};
 
@@ -54,7 +58,8 @@ impl Default for DestinationFilters {
 #[derive(Debug, Clone)]
 pub struct Destination {
     station: StationId,
-    trips: Vec<Trip>,
+    visited_stations: Vec<StationId>,
+    nb_trips: usize,
     current_time: usize,
     duration: usize,
 }
@@ -91,7 +96,7 @@ impl Destination {
     }
 
     pub fn connections_count(&self) -> usize {
-        self.trips.len() - 1
+        self.nb_trips - 1
     }
 
     fn new(station: StationId, trips: Vec<Trip>) -> Self {
@@ -105,11 +110,18 @@ impl Destination {
             .map(|trip| trip.departure)
             .min()
             .unwrap_or_default();
+        let visited_stations = trips
+            .first()
+            .map(|t| t.origin)
+            .into_iter()
+            .chain(trips.iter().map(|t| t.destination))
+            .collect();
         Self {
             station,
+            nb_trips: trips.len(),
+            visited_stations,
             current_time: arrival,
             duration: arrival - departure,
-            trips,
         }
     }
 
@@ -117,7 +129,7 @@ impl Destination {
     /// no loopback). Returns `None` if the trip is not compatible, otherwise `Some(Self)` with
     /// the new extended destination.
     fn try_connect_trip(&self, trip: &Trip, filters: &DestinationFilters) -> Option<Self> {
-        if self.trips.len() > filters.max_connections {
+        if self.nb_trips > filters.max_connections {
             return None;
         }
 
@@ -125,9 +137,7 @@ impl Destination {
             return None;
         }
 
-        if self.trips.iter().any(|visitied| {
-            visitied.origin == trip.destination || visitied.destination == trip.destination
-        }) {
+        if self.visited_stations.contains(&trip.destination) {
             return None;
         }
 
@@ -139,22 +149,26 @@ impl Destination {
             return None;
         }
 
-        let mut new_trips = self.trips.clone();
-        new_trips.push(trip.clone());
+        let mut new_visited = self.visited_stations.clone();
+        new_visited.push(trip.destination);
 
         Some(Self {
             station: trip.destination,
             current_time: trip.arrival,
             duration: self.duration + trip.arrival - self.current_time,
-            trips: new_trips,
+            nb_trips: self.nb_trips + 1,
+            visited_stations: new_visited,
         })
     }
 
-    fn find_connections_from(&self, trips: &[Trip], filters: &DestinationFilters) -> Vec<Self> {
+    fn find_connections_from<'a>(
+        &'a self,
+        trips: &'a [Trip],
+        filters: &'a DestinationFilters,
+    ) -> impl Iterator<Item = Self> + 'a {
         trips
             .iter()
-            .filter_map(|trip| self.try_connect_trip(trip, filters))
-            .collect()
+            .filter_map(move |trip| self.try_connect_trip(trip, filters))
     }
 }
 
@@ -197,22 +211,33 @@ fn find_new_destinations(
         return destinations;
     }
 
-    let mut new_destinations = vec![];
+    // Use a HashMap to deduplicate on the fly: only keep the shortest path to each station.
+    let mut new_destinations: HashMap<StationId, Destination> = HashMap::new();
 
     for destination in destinations.iter() {
         if let Some(trips) = graph.trips_by_nodes.get(&destination.station) {
-            new_destinations.extend(destination.find_connections_from(trips, filters));
+            for candidate_destination in destination.find_connections_from(trips, filters) {
+                match new_destinations.entry(candidate_destination.station) {
+                    Entry::Occupied(mut existing_destination) => {
+                        if candidate_destination.duration < existing_destination.get().duration {
+                            *existing_destination.get_mut() = candidate_destination;
+                        }
+                    }
+                    Entry::Vacant(e) => {
+                        e.insert(candidate_destination);
+                    }
+                }
+            }
         }
     }
-
-    new_destinations = remove_duplicate_destinations(new_destinations);
 
     if new_destinations.is_empty() {
         destinations
     } else {
+        let new_dests_vec: Vec<Destination> = new_destinations.into_values().collect();
         destinations.extend(find_new_destinations(
             graph,
-            new_destinations,
+            new_dests_vec,
             filters,
             nb_of_connections + 1,
         ));
@@ -639,8 +664,9 @@ mod test_destination_struct {
             Trip::new(StationId(2), StationId(1), 1201, 1300),
         ];
 
-        let new_destinations =
-            destination.find_connections_from(&trips, &DestinationFilters::default());
+        let new_destinations: Vec<Destination> = destination
+            .find_connections_from(&trips, &DestinationFilters::default())
+            .collect();
 
         assert_eq!(
             new_destinations,
