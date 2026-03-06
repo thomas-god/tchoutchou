@@ -105,6 +105,7 @@ pub struct DestinationItem {
     station_id: i64,
     duration: usize,
     connections: usize,
+    visited_station_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -130,6 +131,11 @@ pub async fn get_destinations(
             station_id: d.station_id(),
             duration: d.duration(),
             connections: d.connections_count(),
+            visited_station_ids: d
+                .intermediary_station_ids()
+                .iter()
+                .map(|s| s.as_i64())
+                .collect(),
         })
         .collect();
 

@@ -19,6 +19,7 @@ export interface Trip {
 	destination: string;
 	duration: number;
 	legs: TripLeg[];
+	intermediaryStopNames: string[];
 }
 
 export interface TripLeg {
@@ -62,7 +63,8 @@ const internalTripToTrip = (internalTrip: InternalTrip): Trip => {
 		origin: internalTrip.legs.at(0)!.origin,
 		destination: internalTrip.currentStop,
 		duration: duration,
-		legs: internalTrip.legs
+		legs: internalTrip.legs,
+		intermediaryStopNames: []
 	};
 };
 
@@ -95,7 +97,12 @@ export const findDestinations = async (
 
 	return deduplicateTripsByDestination(trips, graph.nodes)
 		.filter(({ trip }) => trip.duration >= filters.minDuration)
-		.map(({ node, trip }) => ({ node: enrichNode(node), trip }))
+		.map(({ node, trip }) => {
+			const intermediaryStopNames = trip.legs.slice(0, -1).map((leg) => {
+				return graph.nodes.get(leg.destination)?.name ?? leg.destination;
+			});
+			return { node: enrichNode(node), trip: { ...trip, intermediaryStopNames } };
+		})
 		.filter((dest): dest is { node: EnrichedNode; trip: Trip } => dest.node !== null);
 };
 

@@ -31,7 +31,10 @@
 			marker: leaflet
 				.marker([destination.node.lat, destination.node.lon], { icon })
 				.bindPopup(
-					`${destination.node.name} (${displayDuration(destination.trip.duration)}, ${destination.trip.legs.length - 1} correspondance(s))`
+					`${destination.node.name} (${displayDuration(destination.trip.duration)}, ${destination.trip.legs.length - 1} correspondance(s))` +
+						(destination.trip.intermediaryStopNames.length > 0
+							? `<br>Via\u00a0: ${destination.trip.intermediaryStopNames.join(' \u2192 ')}`
+							: '')
 				)
 		}))
 	);

@@ -17,6 +17,7 @@ export interface BackendDestinationResult {
 	station: BackendStation;
 	duration: number;
 	connections: number;
+	visitedStations: BackendStation[];
 }
 
 export interface BackendDestinationsResult {
@@ -61,7 +62,7 @@ export const fetchBackendDestinations = query(
 			stations: BackendStation[];
 		};
 		const { destinations } = (await destinationsRes.json()) as {
-			destinations: { station_id: number; duration: number; connections: number }[];
+			destinations: { station_id: number; duration: number; connections: number; visited_station_ids: number[] }[];
 		};
 
 		const stationMap = new Map(stations.map((s) => [s.id, s]));
@@ -72,7 +73,10 @@ export const fetchBackendDestinations = query(
 			.map((d) => ({
 				station: stationMap.get(d.station_id)!,
 				duration: d.duration,
-				connections: d.connections
+				connections: d.connections,
+				visitedStations: (d.visited_station_ids ?? [])
+					.filter((id) => stationMap.has(id))
+					.map((id) => stationMap.get(id)!)
 			}));
 
 		return { origin, destinations: results };

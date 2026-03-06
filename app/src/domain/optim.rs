@@ -99,6 +99,15 @@ impl Destination {
         self.nb_trips - 1
     }
 
+    pub fn intermediary_station_ids(&self) -> &[StationId] {
+        let len = self.visited_stations.len();
+        if len <= 2 {
+            &[]
+        } else {
+            &self.visited_stations[1..len - 1]
+        }
+    }
+
     fn new(station: StationId, trips: Vec<Trip>) -> Self {
         let arrival = trips
             .iter()
@@ -518,6 +527,49 @@ mod test_destination_ord {
 #[cfg(test)]
 mod test_destination_struct {
     use super::*;
+
+    #[test]
+    fn test_intermediary_station_ids_no_connection() {
+        // Single trip: visited = [origin, dest] → no intermediaries
+        let destination = Destination::new(
+            StationId(2),
+            vec![Trip::new(StationId(1), StationId(2), 100, 200)],
+        );
+
+        assert_eq!(destination.intermediary_station_ids(), &[]);
+    }
+
+    #[test]
+    fn test_intermediary_station_ids_one_connection() {
+        // Two trips: visited = [1, 2, 3] → intermediary is [2]
+        let destination = Destination::new(
+            StationId(3),
+            vec![
+                Trip::new(StationId(1), StationId(2), 100, 200),
+                Trip::new(StationId(2), StationId(3), 1200, 1300),
+            ],
+        );
+
+        assert_eq!(destination.intermediary_station_ids(), &[StationId(2)]);
+    }
+
+    #[test]
+    fn test_intermediary_station_ids_two_connections() {
+        // Three trips: visited = [1, 2, 3, 4] → intermediaries are [2, 3]
+        let destination = Destination::new(
+            StationId(4),
+            vec![
+                Trip::new(StationId(1), StationId(2), 100, 200),
+                Trip::new(StationId(2), StationId(3), 1200, 1300),
+                Trip::new(StationId(3), StationId(4), 2300, 2400),
+            ],
+        );
+
+        assert_eq!(
+            destination.intermediary_station_ids(),
+            &[StationId(2), StationId(3)]
+        );
+    }
 
     #[test]
     fn test_try_connect_trip_to_destination_wrong_origin() {
