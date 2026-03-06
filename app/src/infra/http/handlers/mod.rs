@@ -274,7 +274,14 @@ pub async fn remap_station(
         .schedule
         .remap_station(&body.source, &source_id, &internal_id)
     {
-        Ok(()) => StatusCode::NO_CONTENT,
+        Ok(()) => {
+            tracing::info!(
+                "Remap source station {} to internal station {}",
+                source_id.as_str(),
+                internal_id.as_i64()
+            );
+            StatusCode::NO_CONTENT
+        }
         Err(RemapStationError::MappingNotFound | RemapStationError::InternalStationNotFound) => {
             StatusCode::NOT_FOUND
         }
