@@ -60,6 +60,12 @@ impl GTFSRouteId {
     }
 }
 
+impl GTFSTripId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Location type for a stop row (`location_type` column in `stops.txt`).
 ///
 /// Spec: <https://gtfs.org/documentation/schedule/reference/#stopstxt>
@@ -303,6 +309,25 @@ pub enum GTFSRouteType {
     Funicular,
     Trolleybus,
     Monorail,
+}
+
+impl GTFSRouteType {
+    /// Returns a slice containing every variant, useful when no filtering is
+    /// desired and all route types should be accepted.
+    pub fn all() -> &'static [GTFSRouteType] {
+        &[
+            Self::Tram,
+            Self::Subway,
+            Self::Rail,
+            Self::Bus,
+            Self::Ferry,
+            Self::CableTram,
+            Self::AerialLift,
+            Self::Funicular,
+            Self::Trolleybus,
+            Self::Monorail,
+        ]
+    }
 }
 
 impl FromStr for GTFSRouteType {
