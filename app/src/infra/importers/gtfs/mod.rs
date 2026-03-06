@@ -18,6 +18,7 @@ pub trait ParseGTFS {
     /// feed does not include a `calendar.txt` file.
     fn calendar(&self) -> &[GTFSCalendar];
     fn calendar_dates(&self) -> &[GTFSCalendarDate];
+    fn routes(&self) -> &[GTFSRoute];
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, From, Hash, Eq, Ord)]
@@ -283,6 +284,66 @@ impl GTFSCalendar {
     }
     pub fn end_date(&self) -> &str {
         &self.end_date
+    }
+}
+
+/// Route type for a route row (`route_type` column in `routes.txt`).
+///
+/// Spec: <https://gtfs.org/documentation/schedule/reference/#routestxt>
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GTFSRouteType {
+    Tram,
+    Subway,
+    /// Rail = Intercity or long-distance travel.
+    Rail,
+    Bus,
+    Ferry,
+    CableTram,
+    AerialLift,
+    Funicular,
+    Trolleybus,
+    Monorail,
+}
+
+impl FromStr for GTFSRouteType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.trim() {
+            "0" => Self::Tram,
+            "1" => Self::Subway,
+            "2" => Self::Rail,
+            "3" => Self::Bus,
+            "4" => Self::Ferry,
+            "5" => Self::CableTram,
+            "6" => Self::AerialLift,
+            "7" => Self::Funicular,
+            "11" => Self::Trolleybus,
+            "12" => Self::Monorail,
+            _ => return Err(format!("Cannot parse {:?} into GTFSRouteType", s)),
+        })
+    }
+}
+
+/// A single row from `routes.txt`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GTFSRoute {
+    route_id: GTFSRouteId,
+    route_type: GTFSRouteType,
+}
+
+impl GTFSRoute {
+    pub fn new(route_id: GTFSRouteId, route_type: GTFSRouteType) -> Self {
+        Self {
+            route_id,
+            route_type,
+        }
+    }
+    pub fn route_id(&self) -> &GTFSRouteId {
+        &self.route_id
+    }
+    pub fn route_type(&self) -> GTFSRouteType {
+        self.route_type
     }
 }
 

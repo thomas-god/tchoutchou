@@ -1,14 +1,15 @@
 use crate::infra::importers::gtfs::{
-    GTFSCalendar, GTFSCalendarDate, GTFSStop, GTFSStopTime, GTFSTrip, ParseGTFS,
+    GTFSCalendar, GTFSCalendarDate, GTFSRoute, GTFSStop, GTFSStopTime, GTFSTrip, ParseGTFS,
 };
 
 use self::{
-    calendar::CalendarParser, calendar_dates::CalendarDatesParser, stop_times::StopTimesParser,
-    stops::StopsParser, trips::TripsFileParser,
+    calendar::CalendarParser, calendar_dates::CalendarDatesParser, routes::RoutesParser,
+    stop_times::StopTimesParser, stops::StopsParser, trips::TripsFileParser,
 };
 
 pub mod calendar;
 pub mod calendar_dates;
+pub mod routes;
 pub mod stop_times;
 pub mod stops;
 pub mod trips;
@@ -53,6 +54,7 @@ pub struct GTFSParser {
     /// Rows from `calendar.txt`. Empty when the feed does not include the file.
     calendar: Vec<GTFSCalendar>,
     calendar_dates: Vec<GTFSCalendarDate>,
+    routes: Vec<GTFSRoute>,
 }
 
 impl GTFSParser {
@@ -72,6 +74,7 @@ impl GTFSParser {
             .transpose()?
             .unwrap_or_default();
         let stop_times = StopTimesParser::from(read("stop_times.txt")?).parse()?;
+        let routes = RoutesParser::from(read("routes.txt")?).parse()?;
 
         Ok(Self {
             stops,
@@ -79,6 +82,7 @@ impl GTFSParser {
             trips,
             calendar,
             calendar_dates,
+            routes,
         })
     }
 }
@@ -99,6 +103,9 @@ impl ParseGTFS for GTFSParser {
     fn calendar_dates(&self) -> &[GTFSCalendarDate] {
         &self.calendar_dates
     }
+    fn routes(&self) -> &[GTFSRoute] {
+        &self.routes
+    }
 }
 
 #[cfg(test)]
@@ -108,8 +115,8 @@ mod tests {
     use std::fs;
 
     use crate::infra::importers::gtfs::{
-        GTFSCalendarDate, GTFSExceptionType, GTFSLocationType, GTFSRouteId, GTFSServiceId,
-        GTFSStop, GTFSStopId, GTFSStopTime, GTFSTrip, GTFSTripId,
+        GTFSCalendarDate, GTFSExceptionType, GTFSLocationType, GTFSRoute, GTFSRouteId,
+        GTFSRouteType, GTFSServiceId, GTFSStop, GTFSStopId, GTFSStopTime, GTFSTrip, GTFSTripId,
     };
 
     use super::*;
@@ -144,6 +151,13 @@ mod tests {
             "trip_id,arrival_time,departure_time,stop_id,stop_sequence,stop_headsign,pickup_type,drop_off_type,shape_dist_traveled\n\
              TRIP1,10:00:00,10:00:00,StopPoint:PARIS_TGV,0,,0,1,\n\
              TRIP1,12:00:00,12:00:00,StopPoint:LYON_MAIN,1,,1,0,",
+        )
+        .unwrap();
+
+        fs::write(
+            dir.join("routes.txt"),
+            "route_id,agency_id,route_short_name,route_long_name,route_desc,route_type,route_url,route_color,route_text_color\n\
+             ROUTE1,1187,TGV,Paris - Lyon,,2,,0749FF,FFFFFF",
         )
         .unwrap();
     }
@@ -230,6 +244,14 @@ mod tests {
                     1,
                 ),
             ]
+        );
+
+        assert_eq!(
+            parser.routes(),
+            &[GTFSRoute::new(
+                GTFSRouteId::from("ROUTE1".to_string()),
+                GTFSRouteType::Rail,
+            )]
         );
     }
 

@@ -366,6 +366,7 @@ fn reconcile_trips(stations: &[GTFSStation], trips: &[GTFSTripLeg]) -> Vec<Impor
 mod tests {
 
     use super::*;
+    use crate::infra::importers::gtfs::GTFSRoute;
 
     // ── test helpers ────────────────────────────────────────────────────────
 
@@ -427,6 +428,7 @@ mod tests {
         trips: Vec<GTFSTrip>,
         calendar: Vec<GTFSCalendar>,
         calendar_dates: Vec<GTFSCalendarDate>,
+        routes: Vec<GTFSRoute>,
     }
 
     impl ParseGTFS for StubParser {
@@ -444,6 +446,9 @@ mod tests {
         }
         fn calendar_dates(&self) -> &[GTFSCalendarDate] {
             &self.calendar_dates
+        }
+        fn routes(&self) -> &[GTFSRoute] {
+            &self.routes
         }
     }
 
@@ -463,6 +468,7 @@ mod tests {
             trips: vec![],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let mut result = data.stations().to_vec();
@@ -507,6 +513,7 @@ mod tests {
             trips: vec![],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let mut result = data.stations().to_vec();
@@ -543,6 +550,7 @@ mod tests {
             trips: vec![trip("T1", "R1", "SVC1")],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let result = data.trip_legs();
@@ -576,6 +584,7 @@ mod tests {
             trips: vec![trip("T1", "R1", "SVC1")],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let result = data.trip_legs();
@@ -604,6 +613,7 @@ mod tests {
             trips: vec![trip("T1", "R1", "SVC1")],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         assert!(data.trip_legs().is_empty());
@@ -629,6 +639,7 @@ mod tests {
             trips: vec![trip("T1", "R1", "SVC1"), trip("T2", "R1", "SVC2")],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let mut result = data.trip_legs().to_vec();
@@ -661,6 +672,7 @@ mod tests {
             trips: vec![trip("T1", "R1", "SVC1")],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let mut result = data.trip_legs().to_vec();
@@ -699,6 +711,7 @@ mod tests {
                     GTFSExceptionType::ServiceRemoved,
                 ),
             ],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let schedules = data.schedules();
@@ -725,6 +738,7 @@ mod tests {
             ],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let by_route = data.schedules_by_route();
@@ -755,6 +769,7 @@ mod tests {
             trips: vec![trip("T1", "R1", "SVC1"), trip("T2", "R1", "SVC1")],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let by_route = data.schedules_by_route();
@@ -785,6 +800,7 @@ mod tests {
                     GTFSExceptionType::ServiceRemoved,
                 ),
             ],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         assert!(data.schedules().is_empty());
@@ -814,6 +830,7 @@ mod tests {
                     GTFSExceptionType::ServiceAdded,
                 ),
             ],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let mut schedules = data.schedules().to_vec();
@@ -874,6 +891,7 @@ mod tests {
                 "SVC1", true, true, true, true, true, false, false, "20260302", "20260306",
             )],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let schedules = data.schedules();
@@ -907,6 +925,7 @@ mod tests {
                 "20260304".to_owned(), // Wednesday
                 GTFSExceptionType::ServiceAdded,
             )],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let schedules = data.schedules();
@@ -932,6 +951,7 @@ mod tests {
                 "20260304".to_owned(), // Wednesday
                 GTFSExceptionType::ServiceRemoved,
             )],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let schedules = data.schedules();
@@ -967,6 +987,7 @@ mod tests {
                     GTFSExceptionType::ServiceAdded,
                 ),
             ],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let schedules = data.schedules();
@@ -1010,6 +1031,7 @@ mod tests {
                 "20260310", // Wed → Tue, not Mon-aligned
             )],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let schedules = data.schedules();
@@ -1039,6 +1061,7 @@ mod tests {
                 "20260302".to_owned(),
                 GTFSExceptionType::ServiceRemoved,
             )],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         assert!(data.schedules().is_empty());
@@ -1064,6 +1087,7 @@ mod tests {
                 ),
             ],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let mut schedules = data.schedules().to_vec();
@@ -1101,6 +1125,7 @@ mod tests {
             trips: vec![],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let result = data.stations();
@@ -1123,6 +1148,7 @@ mod tests {
             trips: vec![],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         let result = data.stations();
@@ -1148,6 +1174,7 @@ mod tests {
             trips: vec![trip("T1", "R1", "SVC1")],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         assert!(data.trip_legs().is_empty());
@@ -1170,6 +1197,7 @@ mod tests {
             trips: vec![],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         assert!(data.trip_legs().is_empty());
@@ -1193,6 +1221,7 @@ mod tests {
             trips: vec![trip("T1", "R1", "SVC1")],
             calendar: vec![],
             calendar_dates: vec![],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
         assert!(data.trip_legs().is_empty());
@@ -1220,6 +1249,7 @@ mod tests {
                 "20260601".to_owned(),
                 GTFSExceptionType::ServiceAdded,
             )],
+            routes: vec![],
         };
         let data = GTFSImporter::from_parser(&parser, "source").as_data();
 
