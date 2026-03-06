@@ -38,11 +38,36 @@ impl Graph {
     }
 }
 
-#[derive(Debug, Clone, Constructor)]
+#[derive(Debug, Clone)]
 pub struct DestinationFilters {
     max_connections: usize,
     min_connection_duration: usize,
     max_duration: usize,
+}
+
+impl DestinationFilters {
+    pub(crate) const MAX_CONNECTIONS_MIN: usize = 0;
+    pub(crate) const MAX_CONNECTIONS_MAX: usize = 2;
+    pub(crate) const MIN_CONNECTION_DURATION_MIN: usize = 0;
+    pub(crate) const MIN_CONNECTION_DURATION_MAX: usize = 3600 * 6;
+    pub(crate) const MAX_DURATION_MIN: usize = 3600;
+    pub(crate) const MAX_DURATION_MAX: usize = 3600 * 24;
+
+    pub fn new(
+        max_connections: usize,
+        min_connection_duration: usize,
+        max_duration: usize,
+    ) -> Self {
+        Self {
+            max_connections: max_connections
+                .clamp(Self::MAX_CONNECTIONS_MIN, Self::MAX_CONNECTIONS_MAX),
+            min_connection_duration: min_connection_duration.clamp(
+                Self::MIN_CONNECTION_DURATION_MIN,
+                Self::MIN_CONNECTION_DURATION_MAX,
+            ),
+            max_duration: max_duration.clamp(Self::MAX_DURATION_MIN, Self::MAX_DURATION_MAX),
+        }
+    }
 }
 
 impl Default for DestinationFilters {
@@ -251,6 +276,46 @@ fn find_new_destinations(
             nb_of_connections + 1,
         ));
         destinations
+    }
+}
+
+#[cfg(test)]
+mod test_destination_filters {
+    use super::*;
+
+    #[test]
+    fn test_new_accepts_values_within_bounds() {
+        let f = DestinationFilters::new(1, 900, 3600 * 12);
+        assert_eq!(f.max_connections, 1);
+        assert_eq!(f.min_connection_duration, 900);
+        assert_eq!(f.max_duration, 3600 * 12);
+    }
+
+    #[test]
+    fn test_new_clamps_max_connections_above_max() {
+        let f = DestinationFilters::new(usize::MAX, 900, 3600 * 12);
+        assert_eq!(f.max_connections, DestinationFilters::MAX_CONNECTIONS_MAX);
+    }
+
+    #[test]
+    fn test_new_clamps_min_connection_duration_above_max() {
+        let f = DestinationFilters::new(1, usize::MAX, 3600 * 12);
+        assert_eq!(
+            f.min_connection_duration,
+            DestinationFilters::MIN_CONNECTION_DURATION_MAX
+        );
+    }
+
+    #[test]
+    fn test_new_clamps_max_duration_below_min() {
+        let f = DestinationFilters::new(1, 900, 0);
+        assert_eq!(f.max_duration, DestinationFilters::MAX_DURATION_MIN);
+    }
+
+    #[test]
+    fn test_new_clamps_max_duration_above_max() {
+        let f = DestinationFilters::new(1, 900, usize::MAX);
+        assert_eq!(f.max_duration, DestinationFilters::MAX_DURATION_MAX);
     }
 }
 

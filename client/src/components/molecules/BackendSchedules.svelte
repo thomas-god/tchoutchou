@@ -12,6 +12,7 @@
 
 	let stop: { id: number; name: string } | undefined = $state(undefined);
 	let from: string = $state(format(today));
+	let maxConnections: number = $state(0);
 
 	// Station autocomplete state
 	let query = $state('');
@@ -34,7 +35,7 @@
 		if (stop === undefined || from === undefined) {
 			return undefined;
 		}
-		return fetchBackendDestinations({ from: stop.id, date: from });
+		return fetchBackendDestinations({ from: stop.id, date: from, maxConnections });
 	});
 </script>
 
@@ -83,6 +84,20 @@
 					min={format(today)}
 					max={format(nextWeek)}
 				/>
+			</div>
+
+			<!-- Max connections -->
+			<div class="flex flex-col items-start gap-2">
+				<span class="text-sm font-semibold">Nombre de correspondances</span>
+				<div class="join">
+					{#each [0, 1, 2] as n (n)}
+						<button
+							class="btn join-item btn-sm"
+							class:btn-primary={maxConnections === n}
+							onclick={() => (maxConnections = n)}>{n}</button
+						>
+					{/each}
+				</div>
 			</div>
 		</fieldset>
 	</div>

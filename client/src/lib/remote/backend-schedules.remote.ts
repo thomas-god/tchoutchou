@@ -43,19 +43,21 @@ export const autocompleteBackendStation = query(
 
 const fetchParamsSchema = z.object({
 	from: z.number(),
-	date: z.string()
+	date: z.string(),
+	maxConnections: z.number().int().min(0).max(2).optional()
 });
 
 export const fetchBackendDestinations = query(
 	fetchParamsSchema,
-	async ({ from, date }): Promise<BackendDestinationsResult> => {
+	async ({ from, date, maxConnections }): Promise<BackendDestinationsResult> => {
 		const backendUrl = getEnv('BACKEND_URL');
 
 		const yyyymmdd = date.replaceAll('-', '');
+		const connectionsParam = maxConnections !== undefined ? `&max_connections=${maxConnections}` : '';
 
 		const [stationsRes, destinationsRes] = await Promise.all([
 			fetch(`${backendUrl}/api/stations`),
-			fetch(`${backendUrl}/api/destinations?from=${from}&date=${yyyymmdd}`)
+			fetch(`${backendUrl}/api/destinations?from=${from}&date=${yyyymmdd}${connectionsParam}`)
 		]);
 
 		const { stations } = (await stationsRes.json()) as {

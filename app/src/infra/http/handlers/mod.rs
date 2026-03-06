@@ -98,6 +98,7 @@ pub async fn autocomplete_station(
 pub struct DestinationsQueryParameters {
     from: i64,
     date: String,
+    max_connections: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -115,7 +116,11 @@ pub struct DestinationsResponse {
 
 pub async fn get_destinations(
     State(state): State<AppState>,
-    Query(DestinationsQueryParameters { from, date }): Query<DestinationsQueryParameters>,
+    Query(DestinationsQueryParameters {
+        from,
+        date,
+        max_connections,
+    }): Query<DestinationsQueryParameters>,
 ) -> Result<Json<DestinationsResponse>, StatusCode> {
     let graph = state
         .schedule
@@ -123,7 +128,8 @@ pub async fn get_destinations(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let origin = StationId::from(from);
-    let destinations = find_destinations(&origin, &graph, &DestinationFilters::default());
+    let filters = DestinationFilters::new(max_connections.unwrap_or(1), 900, 3600 * 12);
+    let destinations = find_destinations(&origin, &graph, &filters);
 
     let items = destinations
         .into_iter()
