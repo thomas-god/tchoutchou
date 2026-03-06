@@ -13,6 +13,7 @@ use tokio::time::{Instant, sleep_until};
 use crate::{
     app::schedule::ScheduleService,
     infra::{
+        graph_cache::InMemoryGraphCache,
         importers::gtfs::{fetcher::GTFSFetcher, importer::GTFSImporter, parsers::GTFSParser},
         repository::sqlite::SqliteRepository,
     },
@@ -42,7 +43,10 @@ pub struct CronServiceBuilder {
 impl CronServiceBuilder {
     /// Consume the builder by wiring all predefined import jobs to `schedule_service` and
     /// returning a ready-to-run [`CronService`].
-    pub fn build(self, schedule_service: ScheduleService<SqliteRepository>) -> CronService {
+    pub fn build(
+        self,
+        schedule_service: ScheduleService<SqliteRepository, InMemoryGraphCache>,
+    ) -> CronService {
         let mut service = CronService {
             jobs: Vec::new(),
             state_path: self.state_path,

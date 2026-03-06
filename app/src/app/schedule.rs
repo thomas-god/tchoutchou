@@ -351,8 +351,8 @@ pub trait TrainDataRepository {
 
     /// Reassign an existing source station mapping to a different internal station.
     ///
-    /// Returns [`RemapError::MappingNotFound`] when no mapping exists for
-    /// `(source, source_id)`, and [`RemapError::InternalStationNotFound`] when
+    /// Returns [`RemapStationError::MappingNotFound`] when no mapping exists for
+    /// `(source, source_id)`, and [`RemapStationError::InternalStationNotFound`] when
     /// `new_internal_id` does not refer to a known internal station.
     fn update_station_mapping(
         &mut self,
@@ -369,17 +369,25 @@ pub trait TrainDataRepository {
     fn all_internal_stations_enriched(&self) -> Vec<EnrichedInternalStation>;
 }
 
+/// A thread-safe cache mapping date strings (`YYYYMMDD`) to pre-built [`Graph`]s.
+///
+/// Implementations are responsible for their own interior mutability so that methods can be
+/// called with a shared `&self` reference. All clones must share the same underlying storage.
+pub trait GraphCache: Send + Sync {
+    fn get(&self, date: &str) -> Option<Arc<Graph>>;
+    fn insert(&self, date: &str, graph: Arc<Graph>);
+    fn clear(&self);
+}
+
 /// Application service that aggregates data from various importers, persists it through a
 /// [`TrainDataRepository`], and exposes a [`Graph`] ready for the optimisation algorithms in
 /// [`crate::domain::optim`].
-pub struct ScheduleService<R: TrainDataRepository> {
+pub struct ScheduleService<R: TrainDataRepository, GC: GraphCache> {
     repository: Arc<Mutex<R>>,
-    /// Keyed by date string (`YYYYMMDD`). Values are reference-counted so callers receive a
-    /// cheap handle (`Arc<Graph>`) without deep-cloning the graph. Invalidated on ingest.
-    graph_cache: Arc<Mutex<HashMap<String, Arc<Graph>>>>,
+    graph_cache: Arc<GC>,
 }
 
-impl<R: TrainDataRepository> Clone for ScheduleService<R> {
+impl<R: TrainDataRepository, GC: GraphCache> Clone for ScheduleService<R, GC> {
     fn clone(&self) -> Self {
         Self {
             repository: self.repository.clone(),
@@ -388,11 +396,11 @@ impl<R: TrainDataRepository> Clone for ScheduleService<R> {
     }
 }
 
-impl<R: TrainDataRepository> ScheduleService<R> {
-    pub fn new(repository: R) -> Self {
+impl<R: TrainDataRepository, GC: GraphCache> ScheduleService<R, GC> {
+    pub fn new(repository: R, cache: GC) -> Self {
         Self {
             repository: Arc::new(Mutex::new(repository)),
-            graph_cache: Arc::new(Mutex::new(HashMap::new())),
+            graph_cache: Arc::new(cache),
         }
     }
 
@@ -402,7 +410,7 @@ impl<R: TrainDataRepository> ScheduleService<R> {
             .lock()
             .map_err(|_| ())
             .map(|mut repo| repo.import_timetable(data))?;
-        self.graph_cache.lock().map_err(|_| ())?.clear();
+        self.graph_cache.clear();
         Ok(result)
     }
 
@@ -503,11 +511,8 @@ impl<R: TrainDataRepository> ScheduleService<R> {
     /// a new handle to the same allocation — no graph data is ever copied.
     pub fn graph(&self, date: &str) -> Result<Arc<Graph>, ()> {
         // Fast path: return a cached handle without touching the repository.
-        {
-            let cache = self.graph_cache.lock().map_err(|_| ())?;
-            if let Some(graph) = cache.get(date) {
-                return Ok(Arc::clone(graph));
-            }
+        if let Some(graph) = self.graph_cache.get(date) {
+            return Ok(graph);
         }
 
         // Cache miss: load from the repository, then populate the cache.
@@ -524,10 +529,7 @@ impl<R: TrainDataRepository> ScheduleService<R> {
             Arc::new(build_graph(&trips, &mappings))
         };
 
-        self.graph_cache
-            .lock()
-            .map_err(|_| ())?
-            .insert(date.to_owned(), Arc::clone(&graph));
+        self.graph_cache.insert(date, Arc::clone(&graph));
 
         Ok(graph)
     }
@@ -591,6 +593,8 @@ fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 pub mod test_utils {
     use mockall::mock;
 
+    use crate::infra::graph_cache::InMemoryGraphCache;
+
     use super::*;
 
     mock! {
@@ -614,12 +618,24 @@ pub mod test_utils {
             fn all_internal_stations_enriched(&self) -> Vec<EnrichedInternalStation>;
         }
     }
+
+    /// Construct a [`ScheduleService`] backed by `repo` with an in-memory graph cache.
+    /// Use this in unit tests instead of calling [`ScheduleService::new`] directly, so that
+    /// tests remain decoupled from the concrete cache implementation.
+    pub fn make_service(
+        repo: MockTrainDataRepository,
+    ) -> ScheduleService<MockTrainDataRepository, InMemoryGraphCache> {
+        ScheduleService::new(
+            repo,
+            crate::infra::graph_cache::InMemoryGraphCache::default(),
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use crate::app::schedule::test_utils::MockTrainDataRepository;
+    use crate::app::schedule::test_utils::{MockTrainDataRepository, make_service};
 
     use super::*;
 
@@ -682,7 +698,7 @@ mod tests {
             .return_const(trips);
         mock.expect_station_mappings().return_const(mappings);
 
-        let mut service = ScheduleService::new(mock);
+        let mut service = make_service(mock);
         let _ = service.ingest(make_importer("source", &["A", "B"]));
 
         let graph = service.graph(TEST_DATE).expect("should build graph");
@@ -697,7 +713,7 @@ mod tests {
             .return_const(vec![]);
         mock.expect_station_mappings().return_const(vec![]);
 
-        let service = ScheduleService::new(mock);
+        let service = make_service(mock);
         let graph = service.graph(TEST_DATE).expect("should build graph");
         assert_eq!(graph.trips_from(StationId::from(0)).len(), 0);
     }
@@ -717,7 +733,7 @@ mod tests {
             .return_const(trips);
         mock.expect_station_mappings().return_const(mappings);
 
-        let mut service = ScheduleService::new(mock);
+        let mut service = make_service(mock);
         let _ = service.ingest(make_importer("source", &["A", "B"]));
 
         let graph = service.graph(TEST_DATE).expect("should build graph");
@@ -740,7 +756,7 @@ mod tests {
             .return_const(trips);
         mock.expect_station_mappings().return_const(mappings);
 
-        let mut service = ScheduleService::new(mock);
+        let mut service = make_service(mock);
         let _ = service.ingest(make_importer("source", &["A", "B"]));
 
         let graph = service.graph(TEST_DATE).expect("should build graph");
@@ -766,7 +782,7 @@ mod tests {
             .return_const(trips);
         mock.expect_station_mappings().return_const(mappings);
 
-        let mut service = ScheduleService::new(mock);
+        let mut service = make_service(mock);
         let _ = service.ingest(make_importer("source", &["A", "B", "C"]));
 
         let graph = service.graph(TEST_DATE).expect("should build graph");
@@ -803,7 +819,7 @@ mod tests {
             .return_const(trips);
         mock.expect_station_mappings().return_const(mappings);
 
-        let service = ScheduleService::new(mock);
+        let service = make_service(mock);
         let graph = service.graph(TEST_DATE).expect("should build graph");
         // A-* maps to internal station 1 → StationId(1); B maps to internal station 2 → StationId(2).
         // Both trips depart from StationId(1).
@@ -823,7 +839,7 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Ok(()));
 
-        let mut service = ScheduleService::new(mock);
+        let mut service = make_service(mock);
         assert_eq!(service.remap_station("db", &src, &internal_id), Ok(()));
     }
 
@@ -837,7 +853,7 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Err(RemapStationError::MappingNotFound));
 
-        let mut service = ScheduleService::new(mock);
+        let mut service = make_service(mock);
         assert_eq!(
             service.remap_station("db", &src, &internal_id),
             Err(RemapStationError::MappingNotFound)
@@ -854,7 +870,7 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Err(RemapStationError::InternalStationNotFound));
 
-        let mut service = ScheduleService::new(mock);
+        let mut service = make_service(mock);
         assert_eq!(
             service.remap_station("db", &src, &ghost_internal),
             Err(RemapStationError::InternalStationNotFound)
@@ -881,7 +897,7 @@ mod tests {
             .times(1)
             .return_once(move |_, _| expected_clone);
 
-        let service = ScheduleService::new(mock);
+        let service = make_service(mock);
         assert_eq!(
             service.search_stations_by_name("paris", 10).unwrap(),
             expected
@@ -921,7 +937,7 @@ mod tests {
         mock.expect_all_internal_stations_enriched()
             .return_once(|| vec![]);
 
-        let service = ScheduleService::new(mock);
+        let service = make_service(mock);
         assert!(service.find_all_merge_candidates(100.0).unwrap().is_empty());
     }
 
@@ -931,7 +947,7 @@ mod tests {
         mock.expect_all_internal_stations_enriched()
             .return_once(|| vec![enriched(1, "A", 0.0, 0.0), enriched(2, "B", 10.0, 10.0)]);
 
-        let service = ScheduleService::new(mock);
+        let service = make_service(mock);
         assert!(service.find_all_merge_candidates(1.0).unwrap().is_empty());
     }
 
@@ -942,7 +958,7 @@ mod tests {
         mock.expect_all_internal_stations_enriched()
             .return_once(|| vec![enriched(1, "A", 0.0, 0.0), enriched(2, "B", 0.0, 0.001)]);
 
-        let service = ScheduleService::new(mock);
+        let service = make_service(mock);
         let result = service.find_all_merge_candidates(1.0).unwrap();
 
         let names: Vec<&str> = result.iter().map(|g| g.station().name()).collect();
@@ -968,7 +984,7 @@ mod tests {
                 ]
             });
 
-        let service = ScheduleService::new(mock);
+        let service = make_service(mock);
         let result = service.find_all_merge_candidates(10.0).unwrap();
         let group_a = result.iter().find(|g| g.station().name() == "A").unwrap();
         let cand_names: Vec<&str> = group_a
@@ -995,7 +1011,7 @@ mod tests {
                 ]
             });
 
-        let service = ScheduleService::new(mock);
+        let service = make_service(mock);
         let result = service.find_all_merge_candidates(1.0).unwrap();
         assert!(
             result.is_empty(),
@@ -1015,7 +1031,7 @@ mod tests {
                 ]
             });
 
-        let service = ScheduleService::new(mock);
+        let service = make_service(mock);
         let result = service.find_all_merge_candidates(1.0).unwrap();
         assert_eq!(result.len(), 2, "both stations must appear in the result");
         let group_a = result.iter().find(|g| g.station().name() == "A").unwrap();
@@ -1037,7 +1053,7 @@ mod tests {
                 ]
             });
 
-        let service = ScheduleService::new(mock);
+        let service = make_service(mock);
         let result = service.find_all_merge_candidates(10.0).unwrap();
 
         let group_a = result.iter().find(|g| g.station().name() == "A").unwrap();
@@ -1064,7 +1080,7 @@ mod tests {
                 ]
             });
 
-        let service = ScheduleService::new(mock);
+        let service = make_service(mock);
         let result = service.find_all_merge_candidates(1.0).unwrap();
 
         let group_a = result.iter().find(|g| g.station().name() == "A").unwrap();
@@ -1095,7 +1111,7 @@ mod tests {
             .times(1)
             .return_const(mappings);
 
-        let service = ScheduleService::new(mock);
+        let service = make_service(mock);
         let g1 = service.graph(TEST_DATE).expect("first call");
         let g2 = service.graph(TEST_DATE).expect("second call (cached)");
         assert_eq!(
@@ -1134,7 +1150,7 @@ mod tests {
             .times(2)
             .return_const(mappings);
 
-        let mut service = ScheduleService::new(mock);
+        let mut service = make_service(mock);
 
         let g_before = service.graph(TEST_DATE).expect("before ingest");
         assert_eq!(g_before.trips_from(StationId::from(1)).len(), 1);

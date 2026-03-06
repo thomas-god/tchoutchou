@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use app::{
     app::schedule::ScheduleService,
     infra::{
-        config::Config, cron::CronService, http::HttpServer, repository::sqlite::SqliteRepository,
+        config::Config, cron::CronService, graph_cache::InMemoryGraphCache, http::HttpServer,
+        repository::sqlite::SqliteRepository,
     },
 };
 use chrono::Utc;
@@ -21,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
             .to_str()
             .expect("data_location is not valid UTF-8"),
     )?;
-    let schedule_service = ScheduleService::new(repo);
+    let schedule_service = ScheduleService::new(repo, InMemoryGraphCache::default());
     let _ = schedule_service
         .graph(&format!("{}", Utc::now().format("%Y%m%d")))
         .expect("unable to warm graph cache");

@@ -3,7 +3,7 @@ use std::{fs::OpenOptions, io::Write, time::Instant};
 use app::{
     app::schedule::ScheduleService,
     domain::optim::{DestinationFilters, StationId, find_destinations},
-    infra::repository::sqlite::SqliteRepository,
+    infra::{graph_cache::InMemoryGraphCache, repository::sqlite::SqliteRepository},
 };
 use clap::Parser;
 use rusqlite::Connection;
@@ -104,7 +104,7 @@ fn main() -> anyhow::Result<()> {
     );
 
     let repo = SqliteRepository::open(&cli.db)?;
-    let schedule_service = ScheduleService::new(repo);
+    let schedule_service = ScheduleService::new(repo, InMemoryGraphCache::default());
 
     let t0 = Instant::now();
     let graph = schedule_service

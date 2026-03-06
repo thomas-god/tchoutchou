@@ -14,6 +14,7 @@ use crate::{
     app::schedule::ScheduleService,
     infra::{
         config::Config,
+        graph_cache::InMemoryGraphCache,
         http::handlers::{
             autocomplete_station, get_all_stations, get_destinations, get_merge_candidates,
             remap_station,
@@ -26,7 +27,7 @@ mod handlers;
 
 #[derive(Clone)]
 pub struct AppState {
-    schedule: ScheduleService<SqliteRepository>,
+    schedule: ScheduleService<SqliteRepository, InMemoryGraphCache>,
 }
 
 pub struct HttpServer {
@@ -37,7 +38,7 @@ pub struct HttpServer {
 impl HttpServer {
     pub async fn new(
         config: Config,
-        schedule_service: ScheduleService<SqliteRepository>,
+        schedule_service: ScheduleService<SqliteRepository, InMemoryGraphCache>,
     ) -> anyhow::Result<Self> {
         let trace_layer = tower_http::trace::TraceLayer::new_for_http().make_span_with(
             |request: &axum::extract::Request<_>| {
