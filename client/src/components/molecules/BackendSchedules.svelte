@@ -1,17 +1,11 @@
 <script lang="ts">
-	import dayjs from 'dayjs';
 	import {
 		autocompleteBackendStation,
 		fetchBackendDestinations
 	} from '$lib/remote/backend-schedules.remote';
 	import BackendTripsResults from './BackendTripsResults.svelte';
 
-	const today = dayjs();
-	const nextWeek = today.add(1, 'week');
-	const format = (d: dayjs.Dayjs) => d.format('YYYY-MM-DD');
-
 	let stop: { id: number; name: string } | undefined = $state(undefined);
-	let from: string = $state(format(today));
 	let maxConnections: number = $state(0);
 
 	// Station autocomplete state
@@ -32,10 +26,10 @@
 	};
 
 	let tripsPromise = $derived.by(() => {
-		if (stop === undefined || from === undefined) {
+		if (stop === undefined) {
 			return undefined;
 		}
-		return fetchBackendDestinations({ from: stop.id, date: from, maxConnections });
+		return fetchBackendDestinations({ from: stop.id, maxConnections });
 	});
 </script>
 
@@ -71,19 +65,6 @@
 						{/each}
 					</ul>
 				{/if}
-			</div>
-
-			<!-- Date picker -->
-			<div class="flex flex-col items-start justify-stretch gap-2">
-				<label for="backend-select-from-date" class="text-sm font-semibold">Date de départ</label>
-				<input
-					type="date"
-					class="input pl-2"
-					id="backend-select-from-date"
-					bind:value={from}
-					min={format(today)}
-					max={format(nextWeek)}
-				/>
 			</div>
 
 			<!-- Max connections -->

@@ -3,6 +3,7 @@ use axum::{
     extract::{Query, State},
     http::StatusCode,
 };
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -97,7 +98,6 @@ pub async fn autocomplete_station(
 #[derive(Deserialize)]
 pub struct DestinationsQueryParameters {
     from: i64,
-    date: String,
     max_connections: Option<usize>,
 }
 
@@ -118,10 +118,10 @@ pub async fn get_destinations(
     State(state): State<AppState>,
     Query(DestinationsQueryParameters {
         from,
-        date,
         max_connections,
     }): Query<DestinationsQueryParameters>,
 ) -> Result<Json<DestinationsResponse>, StatusCode> {
+    let date = Utc::now().date_naive().format("%Y%m%d").to_string();
     let graph = state
         .schedule
         .graph(&date)
