@@ -321,7 +321,8 @@ impl TrainDataRepository for SqliteRepository {
 
         tx.commit().expect("import_timetable: commit failed");
         let _ = self.conn.execute_batch("PRAGMA optimize;");
-        println!(
+        tracing::info!(
+            source = %data.source(),
             "import_timetable: {} stations ({} changes, {} new internal), {} schedules, {} trips",
             data.stations().len(),
             station_changes.len(),
