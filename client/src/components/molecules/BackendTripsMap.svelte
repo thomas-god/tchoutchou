@@ -11,9 +11,9 @@
 	} from '$lib/remote/backend-schedules.remote';
 
 	interface Props {
-		origin: BackendStation;
+		origin: BackendStation | undefined;
 		destinations: BackendDestinationResult[];
-		bounds: { lat: { min: number; max: number }; lon: { min: number; max: number } };
+		bounds: { lat: { min: number; max: number }; lon: { min: number; max: number } } | undefined;
 		selectedDestination: undefined | BackendDestinationResult;
 	}
 
@@ -86,13 +86,15 @@
 			markersLayer.addLayer(marker);
 		}
 
-		if (destinations.length > 0) {
+		if (destinations.length > 0 && bounds !== undefined) {
 			map.fitBounds([
 				[bounds.lat.min, bounds.lon.min],
 				[bounds.lat.max, bounds.lon.max]
 			]);
-		} else {
+		} else if (origin !== undefined) {
 			map.setView([origin.lat, origin.lon], 13);
+		} else {
+			map.setView([46.5, 2.3], 6);
 		}
 
 		const startIcon = leaflet.divIcon({
@@ -100,9 +102,11 @@
 		    <img src="/icons/city.svg" alt="City" class="w-6 h-6 z-10"/>
 		  `
 		});
-		markersLayer.addLayer(
-			leaflet.marker([origin.lat, origin.lon], { icon: startIcon, zIndexOffset: 1000 })
-		);
+		if (origin !== undefined) {
+			markersLayer.addLayer(
+				leaflet.marker([origin.lat, origin.lon], { icon: startIcon, zIndexOffset: 1000 })
+			);
+		}
 	});
 
 	onDestroy(async () => {
