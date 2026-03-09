@@ -6,7 +6,7 @@ use std::{
 
 use derive_more::{Constructor, From};
 
-use crate::domain::optim::{Graph, StationId, Trip};
+use crate::domain::optim::{CityId, Graph, TripLeg};
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // `Imported*`` types describe the expected shapes of data to be ingested by the schedule service.
@@ -169,9 +169,10 @@ impl From<i64> for InternalStationId {
     }
 }
 
-impl From<&InternalStationId> for StationId {
+// TODO: should map to a city directly ?
+impl From<&InternalStationId> for CityId {
     fn from(value: &InternalStationId) -> Self {
-        StationId::from(value.as_i64())
+        CityId::from(value.as_i64())
     }
 }
 
@@ -549,7 +550,7 @@ fn build_graph(trips: &[InternalTripLeg], mappings: &[StationMapping]) -> Graph 
         .collect();
 
     // 2. Build the graph.
-    let mut trips_by_nodes: HashMap<StationId, Vec<Trip>> = HashMap::new();
+    let mut legs_by_city: HashMap<CityId, Vec<TripLeg>> = HashMap::new();
 
     for trip in trips {
         let Some(&origin_internal) = imported_to_internal.get(trip.origin()) else {
@@ -558,13 +559,13 @@ fn build_graph(trips: &[InternalTripLeg], mappings: &[StationMapping]) -> Graph 
         let Some(&destination_internal) = imported_to_internal.get(trip.destination()) else {
             continue;
         };
-        let origin = StationId::from(origin_internal);
-        let destination = StationId::from(destination_internal);
-        let domain_trip = Trip::new(origin, destination, trip.departure(), trip.arrival());
-        trips_by_nodes.entry(origin).or_default().push(domain_trip);
+        let origin = CityId::from(origin_internal);
+        let destination = CityId::from(destination_internal);
+        let domain_trip = TripLeg::new(origin, destination, trip.departure(), trip.arrival());
+        legs_by_city.entry(origin).or_default().push(domain_trip);
     }
 
-    Graph::new(trips_by_nodes)
+    Graph::new(legs_by_city)
 }
 
 /// Returns `true` when the two stations have no data source in common, meaning they could
@@ -702,7 +703,7 @@ mod tests {
         let _ = service.ingest(make_importer("source", &["A", "B"]));
 
         let graph = service.graph(TEST_DATE).expect("should build graph");
-        assert_eq!(graph.trips_from(StationId::from(1)).len(), 1);
+        assert_eq!(graph.legs_from(CityId::from(1)).len(), 1);
     }
 
     #[test]
@@ -715,7 +716,7 @@ mod tests {
 
         let service = make_service(mock);
         let graph = service.graph(TEST_DATE).expect("should build graph");
-        assert_eq!(graph.trips_from(StationId::from(0)).len(), 0);
+        assert_eq!(graph.legs_from(CityId::from(0)).len(), 0);
     }
 
     #[test]
@@ -737,8 +738,8 @@ mod tests {
         let _ = service.ingest(make_importer("source", &["A", "B"]));
 
         let graph = service.graph(TEST_DATE).expect("should build graph");
-        assert_eq!(graph.trips_from(StationId::from(1)).len(), 0);
-        assert_eq!(graph.trips_from(StationId::from(2)).len(), 0);
+        assert_eq!(graph.legs_from(CityId::from(1)).len(), 0);
+        assert_eq!(graph.legs_from(CityId::from(2)).len(), 0);
     }
 
     #[test]
@@ -760,7 +761,7 @@ mod tests {
         let _ = service.ingest(make_importer("source", &["A", "B"]));
 
         let graph = service.graph(TEST_DATE).expect("should build graph");
-        assert_eq!(graph.trips_from(StationId::from(1)).len(), 0);
+        assert_eq!(graph.legs_from(CityId::from(1)).len(), 0);
     }
 
     #[test]
@@ -786,7 +787,7 @@ mod tests {
         let _ = service.ingest(make_importer("source", &["A", "B", "C"]));
 
         let graph = service.graph(TEST_DATE).expect("should build graph");
-        assert_eq!(graph.trips_from(StationId::from(1)).len(), 3);
+        assert_eq!(graph.legs_from(CityId::from(1)).len(), 3);
     }
 
     #[test]
@@ -823,8 +824,8 @@ mod tests {
         let graph = service.graph(TEST_DATE).expect("should build graph");
         // A-* maps to internal station 1 → StationId(1); B maps to internal station 2 → StationId(2).
         // Both trips depart from StationId(1).
-        assert_eq!(graph.trips_from(StationId::from(1)).len(), 2);
-        assert_eq!(graph.trips_from(StationId::from(2)).len(), 0);
+        assert_eq!(graph.legs_from(CityId::from(1)).len(), 2);
+        assert_eq!(graph.legs_from(CityId::from(2)).len(), 0);
     }
 
     // ---- remap_station ----
@@ -1115,8 +1116,8 @@ mod tests {
         let g1 = service.graph(TEST_DATE).expect("first call");
         let g2 = service.graph(TEST_DATE).expect("second call (cached)");
         assert_eq!(
-            g1.trips_from(StationId::from(1)).len(),
-            g2.trips_from(StationId::from(1)).len()
+            g1.legs_from(CityId::from(1)).len(),
+            g2.legs_from(CityId::from(1)).len()
         );
     }
 
@@ -1153,11 +1154,11 @@ mod tests {
         let mut service = make_service(mock);
 
         let g_before = service.graph(TEST_DATE).expect("before ingest");
-        assert_eq!(g_before.trips_from(StationId::from(1)).len(), 1);
+        assert_eq!(g_before.legs_from(CityId::from(1)).len(), 1);
 
         let _ = service.ingest(make_importer("source", &["A", "B"]));
 
         let g_after = service.graph(TEST_DATE).expect("after ingest");
-        assert_eq!(g_after.trips_from(StationId::from(1)).len(), 0);
+        assert_eq!(g_after.legs_from(CityId::from(1)).len(), 0);
     }
 }

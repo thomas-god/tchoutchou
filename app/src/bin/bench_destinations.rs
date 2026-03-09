@@ -2,7 +2,7 @@ use std::{fs::OpenOptions, io::Write, time::Instant};
 
 use app::{
     app::schedule::ScheduleService,
-    domain::optim::{DestinationFilters, StationId, find_destinations},
+    domain::optim::{CityId, DestinationFilters, find_trips},
     infra::{graph_cache::InMemoryGraphCache, repository::sqlite::SqliteRepository},
 };
 use clap::Parser;
@@ -97,7 +97,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let origin_id = StationId::from(internal_id);
+    let origin_id = CityId::from(internal_id);
     println!(
         "Origin: {} (id={}, source={})",
         station_name, internal_id, cli.source
@@ -114,13 +114,13 @@ fn main() -> anyhow::Result<()> {
     println!("Graph built in {}ms", graph_build_ms);
 
     let t1 = Instant::now();
-    let destinations = find_destinations(&origin_id, &graph, &DestinationFilters::default());
+    let trips = find_trips(&origin_id, &graph, &DestinationFilters::default());
     let first_ms = t1.elapsed().as_millis();
 
     let mut samples_ms: Vec<u128> = vec![first_ms];
     for _ in 1..cli.runs {
         let t = Instant::now();
-        find_destinations(&origin_id, &graph, &DestinationFilters::default());
+        find_trips(&origin_id, &graph, &DestinationFilters::default());
         samples_ms.push(t.elapsed().as_millis());
     }
 
@@ -135,7 +135,7 @@ fn main() -> anyhow::Result<()> {
         station_name,
         internal_id,
         cli.date,
-        destinations.len(),
+        trips.len(),
         graph_build_ms,
         min_ms,
         median_ms,
@@ -155,7 +155,7 @@ fn main() -> anyhow::Result<()> {
         "station_name": station_name,
         "station_id": internal_id,
         "date": cli.date,
-        "destination_count": destinations.len(),
+        "destination_count": trips.len(),
         "graph_build_ms": graph_build_ms,
         "runs": cli.runs,
         "find_destinations_ms": {

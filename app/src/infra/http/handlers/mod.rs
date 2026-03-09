@@ -11,7 +11,7 @@ use crate::{
         ImportedStationId, ImportedStationRef, InternalStation, InternalStationId, MergeCandidate,
         RemapStationError, StationMergeCandidates,
     },
-    domain::optim::{DestinationFilters, StationId, find_destinations},
+    domain::optim::{CityId, DestinationFilters, find_trips},
     infra::http::AppState,
 };
 
@@ -127,18 +127,18 @@ pub async fn get_destinations(
         .graph(&date)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let origin = StationId::from(from);
+    let origin = CityId::from(from);
     let filters = DestinationFilters::new(max_connections.unwrap_or(1), 900, 3600 * 12);
-    let destinations = find_destinations(&origin, &graph, &filters);
+    let destinations = find_trips(&origin, &graph, &filters);
 
     let items = destinations
         .into_iter()
         .map(|d| DestinationItem {
-            station_id: d.station_id(),
+            station_id: d.destination(),
             duration: d.duration(),
-            connections: d.connections_count(),
+            connections: d.number_of_connections(),
             visited_station_ids: d
-                .intermediary_station_ids()
+                .intermediary_city_ids()
                 .iter()
                 .map(|s| s.as_i64())
                 .collect(),
