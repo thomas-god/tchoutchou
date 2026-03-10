@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex};
 
+use rusqlite::Connection;
 use serde::Deserialize;
 
 use crate::app::schedulev2::{
@@ -24,18 +25,58 @@ struct NominatimResponse {
 pub struct NominatimGeospatialRepository {
     client: reqwest::blocking::Client,
     base_url: String,
+    cache: Mutex<Connection>,
 }
 
 impl NominatimGeospatialRepository {
-    pub fn new(base_url: &str) -> Self {
-        let client = reqwest::blocking::Client::new();
-        Self {
-            client,
+    /// Open (or create) a persistent geocode cache at `cache_path`.
+    /// Pass `":memory:"` for a transient in-process cache (useful in tests).
+    pub fn new(base_url: &str, cache_path: &str) -> rusqlite::Result<Self> {
+        let conn = Connection::open(cache_path)?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS geocode_cache (
+                lat  REAL NOT NULL,
+                lon  REAL NOT NULL,
+                city TEXT NOT NULL,
+                country TEXT NOT NULL,
+                PRIMARY KEY (lat, lon)
+            );",
+        )?;
+        Ok(Self {
+            client: reqwest::blocking::Client::new(),
             base_url: base_url.to_string(),
+            cache: Mutex::new(conn),
+        })
+    }
+
+    fn lookup_cache(&self, lat: f64, lon: f64) -> Option<CityInformation> {
+        let conn = self.cache.lock().ok()?;
+        conn.query_row(
+            "SELECT city, country FROM geocode_cache WHERE lat = ?1 AND lon = ?2",
+            rusqlite::params![lat, lon],
+            |row| {
+                let city: String = row.get(0)?;
+                let country: String = row.get(1)?;
+                Ok(CityInformation::new(city, country))
+            },
+        )
+        .ok()
+    }
+
+    fn store_cache(&self, lat: f64, lon: f64, info: &CityInformation) {
+        if let Ok(conn) = self.cache.lock() {
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO geocode_cache (lat, lon, city, country) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![lat, lon, info.name(), info.country()],
+            );
         }
     }
 
     fn reverse_geocode(&self, lat: f64, lon: f64) -> Option<CityInformation> {
+        if let Some(cached) = self.lookup_cache(lat, lon) {
+            return Some(cached);
+        }
+
         let url = format!("{}/reverse", self.base_url.trim_end_matches('/'));
         let response = self
             .client
@@ -65,7 +106,9 @@ impl NominatimGeospatialRepository {
         let city_name = extract_city_name(&addr)?;
         let country = addr.country?;
 
-        Some(CityInformation::new(city_name, country))
+        let info = CityInformation::new(city_name, country);
+        self.store_cache(lat, lon, &info);
+        Some(info)
     }
 }
 
@@ -172,7 +215,7 @@ mod tests {
             .with_body(nominatim_body("Lyon", "France"))
             .create();
 
-        let repo = NominatimGeospatialRepository::new(&server.url());
+        let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
         let result = repo.reverse_geocode(45.75, 4.85).unwrap();
 
         assert_eq!(result.name(), "Lyon");
@@ -189,7 +232,7 @@ mod tests {
             .with_status(500)
             .create();
 
-        let repo = NominatimGeospatialRepository::new(&server.url());
+        let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
         assert!(repo.reverse_geocode(45.75, 4.85).is_none());
     }
 
@@ -204,7 +247,27 @@ mod tests {
             .with_body(r#"{"address":{"country":"France"}}"#)
             .create();
 
-        let repo = NominatimGeospatialRepository::new(&server.url());
+        let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
         assert!(repo.reverse_geocode(45.75, 4.85).is_none());
+    }
+
+    #[test]
+    fn cache_hit_skips_http_call() {
+        let mut server = Server::new();
+        let mock = server
+            .mock("GET", "/reverse")
+            .match_query(Matcher::Any)
+            .with_status(200)
+            .with_header("Content-Type", "application/json")
+            .with_body(nominatim_body("Lyon", "France"))
+            .expect(1)
+            .create();
+
+        let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
+        let first = repo.reverse_geocode(45.75, 4.85).unwrap();
+        let second = repo.reverse_geocode(45.75, 4.85).unwrap();
+
+        assert_eq!(first.name(), second.name());
+        mock.assert();
     }
 }
