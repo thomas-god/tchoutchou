@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use derive_more::From;
 use rusqlite::{Connection, Result, Transaction, params};
 
 use crate::{
@@ -13,6 +14,15 @@ use crate::{
 
 pub struct SqliteRepository {
     conn: Connection,
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
+struct InternalScheduleId(i64);
+
+impl InternalScheduleId {
+    fn value(&self) -> &i64 {
+        &self.0
+    }
 }
 
 impl SqliteRepository {
@@ -98,7 +108,7 @@ impl SqliteRepository {
             CREATE TABLE IF NOT EXISTS t_route_schedules (
                 source      TEXT NOT NULL,
                 route_id    TEXT NOT NULL,
-                schedule_id TEXT NOT NULL,
+                schedule_id INTEGER NOT NULL REFERENCES t_schedules(id) ON DELETE CASCADE,
                 PRIMARY KEY (source, route_id, schedule_id)
             );
             CREATE INDEX IF NOT EXISTS idx_route_schedules
@@ -164,7 +174,12 @@ impl SqliteRepository {
     }
 
     /// Insert schedules (tables were just truncated, so no conflict is expected).
-    fn insert_schedules(tx: &Transaction, schedules: &[ImportedSchedule], source: &str) {
+    fn insert_schedules(
+        tx: &Transaction,
+        schedules: &[ImportedSchedule],
+        source: &str,
+    ) -> HashMap<ImportedScheduleId, InternalScheduleId> {
+        let mut map = HashMap::new();
         let mut schedule_stmt = tx
             .prepare_cached(
                 "INSERT INTO t_schedules (source, source_id) VALUES (?1, ?2) RETURNING id;",
@@ -181,12 +196,15 @@ impl SqliteRepository {
             else {
                 continue;
             };
+            map.insert(s.id().clone(), InternalScheduleId::from(id));
             for date in s.dates() {
                 date_stmt
                     .execute(params![id, source, date])
                     .expect("insert_schedules: execute schedule_dates failed");
             }
         }
+
+        map
     }
 
     /// Insert trip legs (table was just truncated, so no conflict is expected).
@@ -226,6 +244,7 @@ impl SqliteRepository {
         tx: &Transaction,
         mapping: &HashMap<ImportedRouteId, Vec<ImportedScheduleId>>,
         source: &str,
+        schedule_mapping: &HashMap<ImportedScheduleId, InternalScheduleId>,
     ) {
         let mut stmt = tx
             .prepare_cached(
@@ -235,7 +254,10 @@ impl SqliteRepository {
             .expect("insert_route_schedules: prepare failed");
         for (route, schedules) in mapping {
             for schedule in schedules {
-                stmt.execute(params![source, route.as_str(), schedule.as_str()])
+                let Some(sid) = schedule_mapping.get(schedule) else {
+                    continue;
+                };
+                stmt.execute(params![source, route.as_str(), sid.value()])
                     .expect("insert_route_schedules: execute failed");
             }
         }
@@ -283,9 +305,14 @@ impl ScheduleDataRepository for SqliteRepository {
         Self::truncate_timetable(&tx, data.source());
         let station_mapping = Self::insert_stations(&tx, data.stations(), data.source());
         Self::insert_station_to_city(&tx, data.station_to_city(), &station_mapping);
-        Self::insert_schedules(&tx, data.schedules(), data.source());
+        let schedule_mapping = Self::insert_schedules(&tx, data.schedules(), data.source());
         Self::insert_trips(&tx, data.trip_legs(), data.source(), &station_mapping);
-        Self::insert_route_schedules(&tx, data.schedules_by_route(), data.source());
+        Self::insert_route_schedules(
+            &tx,
+            data.schedules_by_route(),
+            data.source(),
+            &schedule_mapping,
+        );
 
         tx.commit().expect("import_timetable: commit failed");
         let _ = self.conn.execute_batch("PRAGMA optimize;");
@@ -364,7 +391,6 @@ impl ScheduleDataRepository for SqliteRepository {
 
         let rows = stmt
             .query_map(params![], |row| {
-                dbg!(&row);
                 let station: i64 = row.get(0)?;
                 let city: i64 = row.get(1)?;
                 Ok((InternalStationId::from(station), CityId::from(city)))
@@ -486,10 +512,16 @@ mod test_sqlite_v2 {
             vec![schedule("S1", &["20260101"])],
             vec![trip("R1", "A", "B", 100, 200)],
             "source",
-            HashMap::from([(
-                ImportedStationId::from("A".to_string()),
-                CityInformation::new("name".to_string(), "country".to_string()),
-            )]),
+            HashMap::from([
+                (
+                    ImportedStationId::from("A".to_string()),
+                    CityInformation::new("city-A".to_string(), "country".to_string()),
+                ),
+                (
+                    ImportedStationId::from("B".to_string()),
+                    CityInformation::new("city-B".to_string(), "country".to_string()),
+                ),
+            ]),
         ));
     }
 
@@ -501,10 +533,16 @@ mod test_sqlite_v2 {
             vec![schedule("S1", &["20260101"])],
             vec![trip("R1", "A", "B", 100, 200)],
             "source",
-            HashMap::from([(
-                ImportedStationId::from("A".to_string()),
-                CityInformation::new("name".to_string(), "country".to_string()),
-            )]),
+            HashMap::from([
+                (
+                    ImportedStationId::from("A".to_string()),
+                    CityInformation::new("city-A".to_string(), "country".to_string()),
+                ),
+                (
+                    ImportedStationId::from("B".to_string()),
+                    CityInformation::new("city-B".to_string(), "country".to_string()),
+                ),
+            ]),
         );
         repo.import_timetable(data.clone());
         assert_eq!(repo.all_stations().len(), 2);
@@ -523,10 +561,16 @@ mod test_sqlite_v2 {
             vec![schedule("S1", &["20260101"])],
             vec![trip("R1", "A", "B", 100, 200)],
             "source",
-            HashMap::from([(
-                ImportedStationId::from("A".to_string()),
-                CityInformation::new("name".to_string(), "country".to_string()),
-            )]),
+            HashMap::from([
+                (
+                    ImportedStationId::from("A".to_string()),
+                    CityInformation::new("city-A".to_string(), "country".to_string()),
+                ),
+                (
+                    ImportedStationId::from("B".to_string()),
+                    CityInformation::new("city-B".to_string(), "country".to_string()),
+                ),
+            ]),
         );
         repo.import_timetable(data.clone());
         assert_eq!(repo.all_stations().len(), 2);
@@ -549,16 +593,26 @@ mod test_sqlite_v2 {
             vec![schedule("S1", &["20260101"])],
             vec![trip("R1", "A", "B", 100, 200)],
             "source",
-            HashMap::from([(
-                ImportedStationId::from("A".to_string()),
-                CityInformation::new("name".to_string(), "country".to_string()),
-            )]),
+            HashMap::from([
+                (
+                    ImportedStationId::from("A".to_string()),
+                    CityInformation::new("city-A".to_string(), "country".to_string()),
+                ),
+                (
+                    ImportedStationId::from("B".to_string()),
+                    CityInformation::new("city-B".to_string(), "country".to_string()),
+                ),
+            ]),
         );
 
         repo.import_timetable(data);
 
         let mapping = repo.stations_to_city();
-        assert_eq!(mapping.len(), 1)
+        assert_eq!(mapping.len(), 2);
+        assert_ne!(
+            mapping.get(&InternalStationId::from(1)),
+            mapping.get(&InternalStationId::from(2)),
+        );
     }
 
     #[test]
@@ -572,11 +626,11 @@ mod test_sqlite_v2 {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("name".to_string(), "country".to_string()),
+                    CityInformation::new("same-city".to_string(), "same-country".to_string()),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("name".to_string(), "country".to_string()),
+                    CityInformation::new("same-city".to_string(), "same-country".to_string()),
                 ),
             ]),
         );
@@ -584,7 +638,44 @@ mod test_sqlite_v2 {
         repo.import_timetable(data);
 
         let mapping = repo.stations_to_city();
-        dbg!(&mapping);
-        assert_eq!(mapping.len(), 2)
+        assert_eq!(mapping.len(), 2);
+        assert_eq!(
+            mapping.get(&InternalStationId::from(1)),
+            mapping.get(&InternalStationId::from(2)),
+        );
+    }
+
+    #[test]
+    fn test_trip_legs() {
+        let mut repo = make_repo();
+        let data = data_to_import(
+            vec![station("A"), station("B")],
+            vec![schedule("S1", &["20260101"])],
+            vec![trip("R1", "A", "B", 100, 200)],
+            "source",
+            HashMap::from([
+                (
+                    ImportedStationId::from("A".to_string()),
+                    CityInformation::new("city-A".to_string(), "country".to_string()),
+                ),
+                (
+                    ImportedStationId::from("B".to_string()),
+                    CityInformation::new("city-B".to_string(), "country".to_string()),
+                ),
+            ]),
+        );
+
+        repo.import_timetable(data);
+
+        let legs = repo.legs_for_date("20260101");
+        assert_eq!(
+            legs,
+            vec![InternalTripLeg::new(
+                InternalStationId::from(1),
+                InternalStationId::from(2),
+                100,
+                200
+            )]
+        );
     }
 }

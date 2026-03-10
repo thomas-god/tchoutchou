@@ -441,10 +441,6 @@ mod tests {
         )
     }
 
-    fn sid(id: &str) -> ImportedStationId {
-        ImportedStationId::from(id.to_owned())
-    }
-
     fn siid(id: i64) -> InternalStationId {
         InternalStationId::from(id)
     }
