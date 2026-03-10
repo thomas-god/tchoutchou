@@ -15,6 +15,13 @@ impl CityId {
     }
 }
 
+#[derive(Debug, Clone, Constructor)]
+pub struct City {
+    id: CityId,
+    name: String,
+    country: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Constructor)]
 pub struct TripLeg {
     origin: CityId,

@@ -8,7 +8,7 @@ use derive_more::{Constructor, From};
 
 use crate::{
     app::schedule::GraphCache,
-    domain::optim::{CityId, Graph, TripLeg},
+    domain::optim::{City, CityId, Graph, TripLeg},
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -118,7 +118,7 @@ impl ImportedRouteId {
     }
 }
 
-/// [`TrainDataToImport`] represents the set of data requiered to ingest train schedules for a
+/// [`TrainDataToImport`] represents the set of data required to ingest train schedules for a
 /// particular source.
 #[derive(Debug, Clone, Constructor)]
 pub struct TrainDataToImport {
@@ -148,33 +148,74 @@ impl TrainDataToImport {
 }
 
 #[derive(Debug, Clone, Constructor)]
-pub struct City {
+pub struct CityInformation {
     name: String,
     country: String,
+}
+
+impl CityInformation {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn country(&self) -> &str {
+        &self.country
+    }
 }
 
 #[derive(Debug, Clone, Constructor)]
 pub struct ScheduleDataToImport {
     train_data: TrainDataToImport,
-    station_to_city: HashMap<ImportedStationId, City>,
+    station_to_city: HashMap<ImportedStationId, CityInformation>,
+}
+
+impl ScheduleDataToImport {
+    pub fn stations(&self) -> &[ImportedStation] {
+        &self.train_data.stations
+    }
+    pub fn trip_legs(&self) -> &[ImportedTripLeg] {
+        &self.train_data.legs
+    }
+    pub fn schedules(&self) -> &[ImportedSchedule] {
+        &self.train_data.schedules
+    }
+    pub fn schedules_by_route(&self) -> &HashMap<ImportedRouteId, Vec<ImportedScheduleId>> {
+        &self.train_data.schedules_by_route
+    }
+    pub fn source(&self) -> &str {
+        &self.train_data.source
+    }
+    pub fn station_to_city(&self) -> &HashMap<ImportedStationId, CityInformation> {
+        &self.station_to_city
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // `ScheduleService` related types.
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, From, Ord)]
+pub struct InternalStationId(i64);
+
+impl InternalStationId {
+    pub fn value(&self) -> &i64 {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone, Constructor, PartialEq, PartialOrd, Eq, Ord)]
 pub struct InternalTripLeg {
-    origin: ImportedStationId,
-    destination: ImportedStationId,
+    origin: InternalStationId,
+    destination: InternalStationId,
     departure: usize,
     arrival: usize,
 }
 
 impl InternalTripLeg {
-    pub fn origin(&self) -> &ImportedStationId {
+    pub fn origin(&self) -> &InternalStationId {
         &self.origin
     }
-    pub fn destination(&self) -> &ImportedStationId {
+    pub fn destination(&self) -> &InternalStationId {
         &self.destination
     }
     pub fn departure(&self) -> usize {
@@ -199,7 +240,7 @@ pub trait ScheduleDataRepository {
     fn legs_for_date(&self, date: &str) -> Vec<InternalTripLeg>;
 
     /// Return all source-to-internal station mappings.
-    fn stations_to_city(&self) -> HashMap<ImportedStationId, CityId>;
+    fn stations_to_city(&self) -> HashMap<InternalStationId, CityId>;
 
     /// Return up to `limit` internal stations whose name contains `query`
     /// (case-insensitive), ordered alphabetically. Intended for autocomplete.
@@ -210,7 +251,7 @@ pub trait GeospatialRepository {
     fn match_stations_to_cities(
         &self,
         stations: &[ImportedStation],
-    ) -> HashMap<ImportedStationId, City>;
+    ) -> HashMap<ImportedStationId, CityInformation>;
 }
 
 /// Application service that aggregates data from various importers, persists it through a
@@ -306,7 +347,7 @@ impl<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository>
 /// so that two providers whose stations share the same internal station are connected in the
 /// resulting graph. Each [`StationId`] directly mirrors the corresponding [`InternalStationId`]
 /// value.
-fn build_graph(legs: &[InternalTripLeg], mappings: &HashMap<ImportedStationId, CityId>) -> Graph {
+fn build_graph(legs: &[InternalTripLeg], mappings: &HashMap<InternalStationId, CityId>) -> Graph {
     let mut legs_by_city: HashMap<CityId, Vec<TripLeg>> = HashMap::new();
 
     for leg in legs {
@@ -345,7 +386,7 @@ pub mod test_utils {
         impl ScheduleDataRepository for ScheduleDataRepository {
             fn import_timetable(&mut self, data: ScheduleDataToImport) -> ScheduleDataImportResult;
             fn legs_for_date(&self, date: &str) -> Vec<InternalTripLeg>;
-            fn stations_to_city(&self) -> HashMap<ImportedStationId, CityId>;
+            fn stations_to_city(&self) -> HashMap<InternalStationId, CityId>;
             fn search_cities_by_name(&self, query: &str, limit: usize) -> Vec<City>;
         }
     }
@@ -361,7 +402,7 @@ pub mod test_utils {
              fn match_stations_to_cities(
                 &self,
                 stations: &[ImportedStation],
-            ) -> HashMap<ImportedStationId, City>;
+            ) -> HashMap<ImportedStationId, CityInformation>;
         }
     }
 
@@ -404,6 +445,10 @@ mod tests {
         ImportedStationId::from(id.to_owned())
     }
 
+    fn siid(id: i64) -> InternalStationId {
+        InternalStationId::from(id)
+    }
+
     fn cid(id: i64) -> CityId {
         CityId::from(id)
     }
@@ -427,8 +472,8 @@ mod tests {
     #[test]
     fn ingest_builds_graph() {
         // trips_for_date returns already-filtered trips
-        let trips = vec![InternalTripLeg::new(sid("A"), sid("B"), 100, 200)];
-        let mappings = HashMap::from([(sid("A"), cid(1)), (sid("B"), cid(2))]);
+        let trips = vec![InternalTripLeg::new(siid(12), siid(142), 100, 200)];
+        let mappings = HashMap::from([(siid(12), cid(1)), (siid(142), cid(2))]);
 
         let mut mock = MockScheduleDataRepository::new();
         mock.expect_import_timetable()
@@ -469,8 +514,8 @@ mod tests {
 
     #[test]
     fn graph_hits_repository_only_once_for_same_date() {
-        let trips = vec![InternalTripLeg::new(sid("A"), sid("B"), 100, 200)];
-        let mappings = HashMap::from([(sid("A"), cid(1)), (sid("B"), cid(2))]);
+        let trips = vec![InternalTripLeg::new(siid(12), siid(142), 100, 200)];
+        let mappings = HashMap::from([(siid(12), cid(1)), (siid(142), cid(2))]);
 
         let mut mock = MockScheduleDataRepository::new();
         // trips_for_date and station_mappings must each be called exactly once despite
@@ -495,9 +540,9 @@ mod tests {
 
     #[test]
     fn ingest_invalidates_graph_cache() {
-        let trips_before = vec![InternalTripLeg::new(sid("A"), sid("B"), 100, 200)];
+        let trips_before = vec![InternalTripLeg::new(siid(12), siid(142), 100, 200)];
         let trips_after = vec![];
-        let mappings = HashMap::from([(sid("A"), cid(1)), (sid("B"), cid(2))]);
+        let mappings = HashMap::from([(siid(12), cid(1)), (siid(142), cid(2))]);
 
         let mut mock = MockScheduleDataRepository::new();
         mock.expect_import_timetable()
