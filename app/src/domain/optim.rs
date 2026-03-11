@@ -20,6 +20,8 @@ pub struct City {
     id: CityId,
     name: String,
     country: String,
+    lat: f64,
+    lon: f64,
 }
 
 impl City {
@@ -31,6 +33,12 @@ impl City {
     }
     pub fn country(&self) -> &str {
         &self.country
+    }
+    pub fn lat(&self) -> f64 {
+        self.lat
+    }
+    pub fn lon(&self) -> f64 {
+        self.lon
     }
 }
 

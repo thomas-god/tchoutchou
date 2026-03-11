@@ -58,8 +58,9 @@ impl SqliteRepository {
                 id      INTEGER PRIMARY KEY AUTOINCREMENT,
                 country TEXT NOT NULL,
                 name    TEXT NOT NULL,
+                lat     REAL NOT NULL,
+                lon     REAL NOT NULL,
                 UNIQUE (country, name)
-
             );
 
             CREATE TABLE IF NOT EXISTS t_stations (
@@ -270,9 +271,9 @@ impl SqliteRepository {
     ) {
         let mut insert_city = tx
             .prepare_cached(
-                "INSERT INTO t_cities (country, name)
-                VALUES (?1, ?2)
-                ON CONFLICT (country, name) DO UPDATE SET country = excluded.country
+                "INSERT INTO t_cities (country, name, lat, lon)
+                VALUES (?1, ?2, ?3, ?4)
+                ON CONFLICT (country, name) DO UPDATE SET lat = excluded.lat, lon = excluded.lon
                 RETURNING id;",
             )
             .expect("insert_cities: prepare failed");
@@ -284,9 +285,10 @@ impl SqliteRepository {
             let Some(station_id) = station_internal_mapping.get(station) else {
                 continue;
             };
-            let Ok(city_id) = insert_city.query_row(params![city.name(), city.country()], |row| {
-                row.get::<_, i64>(0).map(CityId::from)
-            }) else {
+            let Ok(city_id) = insert_city.query_row(
+                params![city.name(), city.country(), city.lat(), city.lon()],
+                |row| row.get::<_, i64>(0).map(CityId::from),
+            ) else {
                 continue;
             };
 
@@ -365,7 +367,7 @@ impl ScheduleDataRepository for SqliteRepository {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, country, name, FROM t_cities
+                "SELECT id, country, name, lat, lon FROM t_cities
                  WHERE LOWER(name) LIKE LOWER(?1)
                  ORDER BY name
                  LIMIT ?2",
@@ -376,7 +378,9 @@ impl ScheduleDataRepository for SqliteRepository {
             let id: i64 = row.get(0)?;
             let country: String = row.get(1)?;
             let name: String = row.get(2)?;
-            Ok(City::new(CityId::from(id), name, country))
+            let lat: f64 = row.get(3)?;
+            let lon: f64 = row.get(4)?;
+            Ok(City::new(CityId::from(id), name, country, lat, lon))
         })
         .expect("search_cities_by_name: query failed")
         .map(|r| r.expect("search_cities_by_name: row mapping failed"))
@@ -515,11 +519,11 @@ mod test_sqlite_v2 {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".to_string(), "country".to_string()),
+                    CityInformation::new("city-A".to_string(), "country".to_string(), 0.0, 0.0),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".to_string(), "country".to_string()),
+                    CityInformation::new("city-B".to_string(), "country".to_string(), 0.0, 0.0),
                 ),
             ]),
         ));
@@ -536,11 +540,11 @@ mod test_sqlite_v2 {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".to_string(), "country".to_string()),
+                    CityInformation::new("city-A".to_string(), "country".to_string(), 0.0, 0.0),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".to_string(), "country".to_string()),
+                    CityInformation::new("city-B".to_string(), "country".to_string(), 0.0, 0.0),
                 ),
             ]),
         );
@@ -564,11 +568,11 @@ mod test_sqlite_v2 {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".to_string(), "country".to_string()),
+                    CityInformation::new("city-A".to_string(), "country".to_string(), 0.0, 0.0),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".to_string(), "country".to_string()),
+                    CityInformation::new("city-B".to_string(), "country".to_string(), 0.0, 0.0),
                 ),
             ]),
         );
@@ -596,11 +600,11 @@ mod test_sqlite_v2 {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".to_string(), "country".to_string()),
+                    CityInformation::new("city-A".to_string(), "country".to_string(), 0.0, 0.0),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".to_string(), "country".to_string()),
+                    CityInformation::new("city-B".to_string(), "country".to_string(), 0.0, 0.0),
                 ),
             ]),
         );
@@ -626,11 +630,21 @@ mod test_sqlite_v2 {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("same-city".to_string(), "same-country".to_string()),
+                    CityInformation::new(
+                        "same-city".to_string(),
+                        "same-country".to_string(),
+                        0.0,
+                        0.0,
+                    ),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("same-city".to_string(), "same-country".to_string()),
+                    CityInformation::new(
+                        "same-city".to_string(),
+                        "same-country".to_string(),
+                        0.0,
+                        0.0,
+                    ),
                 ),
             ]),
         );
@@ -656,11 +670,11 @@ mod test_sqlite_v2 {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".to_string(), "country".to_string()),
+                    CityInformation::new("city-A".to_string(), "country".to_string(), 0.0, 0.0),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".to_string(), "country".to_string()),
+                    CityInformation::new("city-B".to_string(), "country".to_string(), 0.0, 0.0),
                 ),
             ]),
         );

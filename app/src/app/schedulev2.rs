@@ -147,10 +147,12 @@ impl TrainDataToImport {
     }
 }
 
-#[derive(Debug, Clone, Constructor)]
+#[derive(Debug, Clone, Constructor, PartialEq, PartialOrd)]
 pub struct CityInformation {
     name: String,
     country: String,
+    lat: f64,
+    lon: f64,
 }
 
 impl CityInformation {
@@ -160,6 +162,14 @@ impl CityInformation {
 
     pub fn country(&self) -> &str {
         &self.country
+    }
+
+    pub fn lat(&self) -> f64 {
+        self.lat
+    }
+
+    pub fn lon(&self) -> f64 {
+        self.lon
     }
 }
 
