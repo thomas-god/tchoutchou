@@ -7,8 +7,11 @@ use rusqlite::Connection;
 use serde::Deserialize;
 
 use crate::app::{
-    ImportedStation, ImportedStationId,
-    schedulev2::{CityInformation, GeospatialRepository},
+    ImportedStation,
+    schedulev2::{
+        CityInformation, FailureReason, GeospatialMappingFailure, GeospatialMappingResult,
+        GeospatialRepository,
+    },
 };
 
 #[derive(Deserialize, Debug, Default)]
@@ -17,7 +20,9 @@ struct NominatimAddress {
     city: Option<String>,
     town: Option<String>,
     village: Option<String>,
+    hamlet: Option<String>,
     country: Option<String>,
+    municipality: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -82,9 +87,9 @@ impl NominatimGeospatialRepository {
         }
     }
 
-    async fn reverse_geocode(&self, lat: f64, lon: f64) -> Option<CityInformation> {
+    async fn reverse_geocode(&self, lat: f64, lon: f64) -> Result<CityInformation, FailureReason> {
         if let Some(cached) = self.lookup_cache(lat, lon) {
-            return Some(cached);
+            return Ok(cached);
         }
 
         let url = format!("{}/reverse", self.base_url.trim_end_matches('/'));
@@ -100,28 +105,38 @@ impl NominatimGeospatialRepository {
             ])
             .send()
             .await
-            .ok()?;
+            .map_err(|_| FailureReason::NetworkError)?;
 
         if !response.status().is_success() {
+            let status_code = response.status().as_u16();
             tracing::warn!(
                 lat,
                 lon,
-                status = response.status().as_u16(),
+                status = status_code,
                 "Nominatim reverse geocoding failed"
             );
-            return None;
+            return Err(FailureReason::HttpError { status_code });
         }
 
-        let nominatim: NominatimResponse = response.json().await.ok()?;
-        let city_lat = nominatim.lat.parse::<f64>().ok()?;
-        let city_lon = nominatim.lon.parse::<f64>().ok()?;
+        let nominatim: NominatimResponse = response
+            .json()
+            .await
+            .map_err(|_| FailureReason::NetworkError)?;
+        let city_lat = nominatim
+            .lat
+            .parse::<f64>()
+            .map_err(|_| FailureReason::InvalidCoordinates)?;
+        let city_lon = nominatim
+            .lon
+            .parse::<f64>()
+            .map_err(|_| FailureReason::InvalidCoordinates)?;
         let addr = nominatim.address;
-        let city_name = extract_city_name(&addr)?;
-        let country = addr.country?;
+        let city_name = extract_city_name(&addr).ok_or(FailureReason::MissingCityData)?;
+        let country = addr.country.ok_or(FailureReason::MissingCityData)?;
 
         let info = CityInformation::new(city_name, country, city_lat, city_lon);
         self.store_cache(lat, lon, &info);
-        Some(info)
+        Ok(info)
     }
 }
 
@@ -130,30 +145,42 @@ fn extract_city_name(addr: &NominatimAddress) -> Option<String> {
         .clone()
         .or_else(|| addr.town.clone())
         .or_else(|| addr.village.clone())
+        .or_else(|| addr.hamlet.clone())
+        .or_else(|| addr.municipality.clone())
 }
 
 impl GeospatialRepository for NominatimGeospatialRepository {
     async fn match_stations_to_cities(
         &self,
         stations: &[ImportedStation],
-    ) -> HashMap<ImportedStationId, CityInformation> {
-        let mut result = HashMap::new();
+    ) -> GeospatialMappingResult {
+        let mut mapping = HashMap::new();
+        let mut failures = Vec::new();
 
         for station in stations {
-            let city = self.reverse_geocode(station.lat(), station.lon()).await;
-
-            if let Some(info) = city {
-                result.insert(station.id().clone(), info);
-            } else {
-                tracing::warn!(
-                    station_id = station.id().as_str(),
-                    name = station.name(),
-                    "Could not resolve city for station"
-                );
+            match self.reverse_geocode(station.lat(), station.lon()).await {
+                Ok(info) => {
+                    mapping.insert(station.id().clone(), info);
+                }
+                Err(reason) => {
+                    tracing::warn!(
+                        station_id = station.id().as_str(),
+                        name = station.name(),
+                        reason = ?reason,
+                        "Could not resolve city for station"
+                    );
+                    failures.push(GeospatialMappingFailure {
+                        station_id: station.id().clone(),
+                        station_name: station.name().to_string(),
+                        lat: station.lat(),
+                        lon: station.lon(),
+                        reason,
+                    });
+                }
             }
         }
 
-        result
+        GeospatialMappingResult { mapping, failures }
     }
 }
 
@@ -161,13 +188,23 @@ impl GeospatialRepository for NominatimGeospatialRepository {
 mod tests {
     use mockito::{Matcher, Server};
 
+    use crate::app::ImportedStationId;
+
     use super::*;
 
-    fn addr(city: Option<&str>, town: Option<&str>, village: Option<&str>) -> NominatimAddress {
+    fn addr(
+        city: Option<&str>,
+        town: Option<&str>,
+        village: Option<&str>,
+        hamlet: Option<&str>,
+        municipality: Option<&str>,
+    ) -> NominatimAddress {
         NominatimAddress {
             city: city.map(str::to_owned),
             town: town.map(str::to_owned),
             village: village.map(str::to_owned),
+            hamlet: hamlet.map(str::to_owned),
+            municipality: municipality.map(str::to_owned),
             country: None,
         }
     }
@@ -176,25 +213,43 @@ mod tests {
 
     #[test]
     fn city_takes_priority_over_all_others() {
-        let a = addr(Some("Paris"), Some("Le Perreux"), Some("v"));
+        let a = addr(
+            Some("Paris"),
+            Some("Le Perreux"),
+            Some("v"),
+            Some("h"),
+            Some("m"),
+        );
         assert_eq!(extract_city_name(&a).as_deref(), Some("Paris"));
     }
 
     #[test]
     fn town_used_when_no_city() {
-        let a = addr(None, Some("Mâcon"), None);
+        let a = addr(None, Some("Mâcon"), None, None, None);
         assert_eq!(extract_city_name(&a).as_deref(), Some("Mâcon"));
     }
 
     #[test]
     fn village_used_when_no_city_or_town() {
-        let a = addr(None, None, Some("Loché"));
+        let a = addr(None, None, Some("Loché"), None, None);
         assert_eq!(extract_city_name(&a).as_deref(), Some("Loché"));
     }
 
     #[test]
+    fn hamlet_used_when_no_city_town_or_village() {
+        let a = addr(None, None, None, Some("Petit Hamlet"), None);
+        assert_eq!(extract_city_name(&a).as_deref(), Some("Petit Hamlet"));
+    }
+
+    #[test]
+    fn municipality_used_when_all_higher_priority_absent() {
+        let a = addr(None, None, None, None, Some("Test Municipality"));
+        assert_eq!(extract_city_name(&a).as_deref(), Some("Test Municipality"));
+    }
+
+    #[test]
     fn returns_none_when_all_fields_absent() {
-        let a = addr(None, None, None);
+        let a = addr(None, None, None, None, None);
         assert_eq!(extract_city_name(&a), None);
     }
 
@@ -239,7 +294,12 @@ mod tests {
             .await;
 
         let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
-        assert!(repo.reverse_geocode(45.75, 4.85).await.is_none());
+        let result = repo.reverse_geocode(45.75, 4.85).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            FailureReason::HttpError { status_code: 500 }
+        );
     }
 
     #[tokio::test]
@@ -250,12 +310,14 @@ mod tests {
             .match_query(Matcher::Any)
             .with_status(200)
             .with_header("Content-Type", "application/json")
-            .with_body(r#"{"address":{"country":"France"}}"#)
+            .with_body(r#"{"lat":"45.75","lon":"4.85","address":{"country":"France"}}"#)
             .create_async()
             .await;
 
         let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
-        assert!(repo.reverse_geocode(45.75, 4.85).await.is_none());
+        let result = repo.reverse_geocode(45.75, 4.85).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), FailureReason::MissingCityData);
     }
 
     #[tokio::test]
@@ -313,7 +375,9 @@ mod tests {
             .await;
 
         let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
-        assert!(repo.reverse_geocode(45.75, 4.85).await.is_none());
+        let result = repo.reverse_geocode(45.75, 4.85).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), FailureReason::InvalidCoordinates);
     }
 
     // ---- match_stations_to_cities ----
@@ -342,7 +406,16 @@ mod tests {
             .match_stations_to_cities(&[station("A", 0.0, 0.0)])
             .await;
 
-        assert!(result.is_empty());
+        assert!(result.mapping.is_empty());
+        assert_eq!(result.failures.len(), 1);
+        assert_eq!(
+            result.failures[0].station_id,
+            ImportedStationId::from("A".to_owned())
+        );
+        assert_eq!(
+            result.failures[0].reason,
+            FailureReason::HttpError { status_code: 500 }
+        );
     }
 
     #[tokio::test]
@@ -362,12 +435,21 @@ mod tests {
         let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
         let result = repo.match_stations_to_cities(&stations).await;
 
-        assert_eq!(result.len(), 2);
-        assert!(result.contains_key(&ImportedStationId::from("A".to_owned())));
-        assert!(result.contains_key(&ImportedStationId::from("B".to_owned())));
+        assert_eq!(result.mapping.len(), 2);
+        assert!(result.failures.is_empty());
+        assert!(
+            result
+                .mapping
+                .contains_key(&ImportedStationId::from("A".to_owned()))
+        );
+        assert!(
+            result
+                .mapping
+                .contains_key(&ImportedStationId::from("B".to_owned()))
+        );
         assert_eq!(
-            result.get(&ImportedStationId::from("A".to_owned())),
-            result.get(&ImportedStationId::from("B".to_owned()))
+            result.mapping.get(&ImportedStationId::from("A".to_owned())),
+            result.mapping.get(&ImportedStationId::from("B".to_owned()))
         );
     }
 }

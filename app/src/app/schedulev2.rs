@@ -124,11 +124,34 @@ pub trait ScheduleDataRepository {
     fn search_cities_by_name(&self, query: &str, limit: usize) -> Vec<City>;
 }
 
+#[derive(Debug, Clone)]
+pub struct GeospatialMappingResult {
+    pub mapping: HashMap<ImportedStationId, CityInformation>,
+    pub failures: Vec<GeospatialMappingFailure>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GeospatialMappingFailure {
+    pub station_id: ImportedStationId,
+    pub station_name: String,
+    pub lat: f64,
+    pub lon: f64,
+    pub reason: FailureReason,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FailureReason {
+    HttpError { status_code: u16 },
+    MissingCityData,
+    InvalidCoordinates,
+    NetworkError,
+}
+
 pub trait GeospatialRepository: Clone + Send + Sync + 'static {
     fn match_stations_to_cities(
         &self,
         stations: &[ImportedStation],
-    ) -> impl Future<Output = HashMap<ImportedStationId, CityInformation>> + Send;
+    ) -> impl Future<Output = GeospatialMappingResult> + Send;
 }
 
 /// Application service that aggregates data from various importers, persists it through a
@@ -167,12 +190,20 @@ impl<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository>
         &mut self,
         data: TrainDataToImport,
     ) -> Result<ScheduleDataImportResult, ()> {
-        let city_mapping = self.geo.match_stations_to_cities(data.stations()).await;
+        let geo_result = self.geo.match_stations_to_cities(data.stations()).await;
+
+        if !geo_result.failures.is_empty() {
+            tracing::warn!(
+                "Geospatial mapping had {} failures out of {} stations",
+                geo_result.failures.len(),
+                data.stations().len()
+            );
+        }
 
         let result = self.repository.lock().map_err(|_| ()).map(|mut repo| {
             repo.import_timetable(ScheduleDataToImport {
                 train_data: data,
-                station_to_city: city_mapping,
+                station_to_city: geo_result.mapping,
             })
         })?;
         self.graph_cache.clear();
@@ -282,7 +313,7 @@ pub mod test_utils {
              async fn match_stations_to_cities(
                 &self,
                 stations: &[ImportedStation],
-            ) -> HashMap<ImportedStationId, CityInformation>;
+            ) -> GeospatialMappingResult;
         }
     }
 
@@ -345,8 +376,8 @@ mod tests {
 
     // ---- graph building ----
 
-    #[test]
-    fn ingest_builds_graph() {
+    #[tokio::test]
+    async fn ingest_builds_graph() {
         // trips_for_date returns already-filtered trips
         let trips = vec![InternalTripLeg::new(siid(12), siid(142), 100, 200)];
         let mappings = HashMap::from([(siid(12), cid(1)), (siid(142), cid(2))]);
@@ -363,10 +394,13 @@ mod tests {
         let mut geo = MockGeospatialRepository::new();
         geo.expect_match_stations_to_cities()
             .once()
-            .returning(|_| HashMap::new());
+            .returning(|_| GeospatialMappingResult {
+                mapping: HashMap::new(),
+                failures: vec![],
+            });
 
         let mut service = make_service(mock, geo);
-        let _ = service.ingest(make_importer("source", &["A", "B"]));
+        let _ = service.ingest(make_importer("source", &["A", "B"])).await;
 
         let graph = service.graph(TEST_DATE).expect("should build graph");
         assert_eq!(graph.legs_from(CityId::from(1)).len(), 1);
@@ -414,8 +448,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn ingest_invalidates_graph_cache() {
+    #[tokio::test]
+    async fn ingest_invalidates_graph_cache() {
         let trips_before = vec![InternalTripLeg::new(siid(12), siid(142), 100, 200)];
         let trips_after = vec![];
         let mappings = HashMap::from([(siid(12), cid(1)), (siid(142), cid(2))]);
@@ -446,14 +480,17 @@ mod tests {
         let mut geo = MockGeospatialRepository::new();
         geo.expect_match_stations_to_cities()
             .once()
-            .returning(|_| HashMap::new());
+            .returning(|_| GeospatialMappingResult {
+                mapping: HashMap::new(),
+                failures: vec![],
+            });
 
         let mut service = make_service(mock, geo);
 
         let g_before = service.graph(TEST_DATE).expect("before ingest");
         assert_eq!(g_before.legs_from(CityId::from(1)).len(), 1);
 
-        let _ = service.ingest(make_importer("source", &["A", "B"]));
+        let _ = service.ingest(make_importer("source", &["A", "B"])).await;
 
         let g_after = service.graph(TEST_DATE).expect("after ingest");
         assert_eq!(g_after.legs_from(CityId::from(1)).len(), 0);
