@@ -5,7 +5,7 @@ use anyhow::Context;
 const SERVER_PORT_KEY: &str = "SERVER_PORT";
 const ALLOW_ORIGIN_KEY: &str = "ALLOW_ORIGIN";
 const DATA_LOCATION_KEY: &str = "DATA_LOCATION";
-const NOMINATIM_URL_KEY: &str = "NOMINATIM_URL_KEY";
+const NOMINATIM_URL_KEY: &str = "NOMINATIM_URL";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {

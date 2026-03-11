@@ -14,9 +14,13 @@ services:
       SERVER_PORT: 3001
       ALLOW_ORIGIN: https://train.trackforge.fr
       DATA_LOCATION: /data
+      NOMINATIM_URL_FILE: /run/secrets/tchoutchou_nominatim_url
 
     networks:
       - traefik-public
+
+    secrets:
+      - tchoutchou_nominatim_url
 
     volumes:
       - tchoutchou_data:/data
@@ -44,19 +48,10 @@ services:
 
       - 'traefik.docker.network=traefik-public'
     environment:
-      VITE_API_KEY_FILE: /run/secrets/tchoutchou_api_key
-      VITE_DATABASE_PATH: /data/tchoutchou.db
-      VITE_DESTINATIONS_DATABASE_PATH: /data/nodes.db
-      VITE_DATA_PATH: /data
       BACKEND_URL: http://tchoutchou-api:3001
 
     networks:
       - traefik-public
-    secrets:
-      - tchoutchou_api_key
-
-    volumes:
-      - tchoutchou_data:/data
 
     deploy:
       resources:
@@ -70,7 +65,7 @@ services:
         order: start-first
 
 secrets:
-  tchoutchou_api_key:
+  tchoutchou_nominatim_url:
     external: true
 
 networks:
