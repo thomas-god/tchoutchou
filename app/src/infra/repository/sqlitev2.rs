@@ -289,7 +289,7 @@ impl SqliteRepository {
                 continue;
             };
             let Ok(city_id) = insert_city.query_row(
-                params![city.name(), city.country(), city.lat(), city.lon()],
+                params![city.country(), city.name(), city.lat(), city.lon()],
                 |row| row.get::<_, i64>(0).map(CityId::from),
             ) else {
                 continue;
@@ -453,6 +453,25 @@ impl SqliteRepository {
         })
         .expect("all_trip_legs: query failed")
         .map(|r| r.expect("all_trip_legs: row mapping failed"))
+        .collect()
+    }
+
+    fn all_cities(&self) -> Vec<City> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, country, name, lat, lon FROM t_cities ORDER BY id")
+            .expect("all_cities: prepare failed");
+
+        stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let country: String = row.get(1)?;
+            let name: String = row.get(2)?;
+            let lat: f64 = row.get(3)?;
+            let lon: f64 = row.get(4)?;
+            Ok(City::new(CityId::from(id), name, country, lat, lon))
+        })
+        .expect("all_cities: query failed")
+        .map(|r| r.expect("all_cities: row mapping failed"))
         .collect()
     }
 }
@@ -694,5 +713,35 @@ mod test_sqlite_v2 {
                 200
             )]
         );
+    }
+
+    #[test]
+    fn test_city_name_and_country_correctly_stored() {
+        let mut repo = make_repo();
+        let data = data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "Paris".to_string(),
+                    "France".to_string(),
+                    48.8566,
+                    2.3522,
+                ),
+            )]),
+        );
+
+        repo.import_timetable(data);
+
+        let cities = repo.all_cities();
+        assert_eq!(cities.len(), 1);
+        let city = &cities[0];
+        assert_eq!(city.name(), "Paris");
+        assert_eq!(city.country(), "France");
+        assert_eq!(city.lat(), 48.8566);
+        assert_eq!(city.lon(), 2.3522);
     }
 }
