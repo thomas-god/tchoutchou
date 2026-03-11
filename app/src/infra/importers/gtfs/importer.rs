@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use derive_more::{Constructor, From};
 
-use crate::app::schedule::{
+use crate::app::{
     ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation, ImportedStationId,
     ImportedTripLeg, TrainDataToImport,
 };

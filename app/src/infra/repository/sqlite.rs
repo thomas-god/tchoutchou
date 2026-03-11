@@ -2,11 +2,14 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, OptionalExtension, Result, Transaction, params};
 
-use crate::app::schedule::{
-    EnrichedInternalStation, ImportedRouteId, ImportedSchedule, ImportedScheduleId,
-    ImportedStation, ImportedStationId, ImportedStationRef, ImportedTripLeg, InternalStation,
-    InternalStationId, InternalTripLeg, RemapStationError, StationChange, StationMapping,
-    TrainDataImportResult, TrainDataRepository, TrainDataToImport,
+use crate::app::{
+    ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation, ImportedStationId,
+    ImportedTripLeg, TrainDataToImport,
+    schedule::{
+        EnrichedInternalStation, ImportedStationRef, InternalStation, InternalStationId,
+        InternalTripLeg, RemapStationError, StationChange, StationMapping, TrainDataImportResult,
+        TrainDataRepository,
+    },
 };
 
 /// SQLite-backed implementation of [`TrainDataRepository`].

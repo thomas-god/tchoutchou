@@ -3,8 +3,9 @@ use std::{collections::HashMap, sync::Mutex};
 use rusqlite::Connection;
 use serde::Deserialize;
 
-use crate::app::schedulev2::{
-    CityInformation, GeospatialRepository, ImportedStation, ImportedStationId,
+use crate::app::{
+    ImportedStation, ImportedStationId,
+    schedulev2::{CityInformation, GeospatialRepository},
 };
 
 #[derive(Deserialize, Debug, Default)]

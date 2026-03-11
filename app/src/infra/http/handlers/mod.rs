@@ -7,9 +7,12 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    app::schedule::{
-        ImportedStationId, ImportedStationRef, InternalStation, InternalStationId, MergeCandidate,
-        RemapStationError, StationMergeCandidates,
+    app::{
+        ImportedStationId,
+        schedule::{
+            ImportedStationRef, InternalStation, InternalStationId, MergeCandidate,
+            RemapStationError, StationMergeCandidates,
+        },
     },
     domain::optim::{CityId, DestinationFilters, find_trips},
     infra::http::AppState,

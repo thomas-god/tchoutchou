@@ -4,10 +4,13 @@ use derive_more::From;
 use rusqlite::{Connection, Result, Transaction, params};
 
 use crate::{
-    app::schedulev2::{
-        CityInformation, ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation,
-        ImportedStationId, ImportedTripLeg, InternalStationId, InternalTripLeg,
-        ScheduleDataImportResult, ScheduleDataRepository, ScheduleDataToImport,
+    app::{
+        ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation, ImportedStationId,
+        ImportedTripLeg,
+        schedulev2::{
+            CityInformation, InternalStationId, InternalTripLeg, ScheduleDataImportResult,
+            ScheduleDataRepository, ScheduleDataToImport,
+        },
     },
     domain::optim::{City, CityId},
 };
@@ -456,7 +459,7 @@ impl SqliteRepository {
 
 #[cfg(test)]
 mod test_sqlite_v2 {
-    use crate::app::schedulev2::{CityInformation, TrainDataToImport};
+    use crate::app::{TrainDataToImport, schedulev2::CityInformation};
 
     use super::*;
 
