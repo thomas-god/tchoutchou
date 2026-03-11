@@ -1,5 +1,5 @@
 <script lang="ts">
-	import Schedules from '../components/molecules/Schedules.svelte';
+	import BackendSchedules from '../components/molecules/BackendSchedules.svelte';
 </script>
 
-<Schedules />
+<BackendSchedules />
