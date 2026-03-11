@@ -70,8 +70,30 @@ pub struct DestinationResponseItem {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct CityResponseItem {
+    id: i64,
+    name: String,
+    country: String,
+    lat: f64,
+    lon: f64,
+}
+
+impl From<City> for CityResponseItem {
+    fn from(city: City) -> Self {
+        Self {
+            id: city.id().as_i64(),
+            name: city.name().to_owned(),
+            country: city.country().to_owned(),
+            lat: city.lat(),
+            lon: city.lon(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct DestinationsResponse {
     destinations: Vec<DestinationResponseItem>,
+    cities: Vec<CityResponseItem>,
 }
 
 pub async fn get_destinations(
@@ -85,7 +107,7 @@ pub async fn get_destinations(
 
     let origin = CityId::from(from);
     let filters = DestinationFilters::new(max_connections.unwrap_or(1), 900, 3600 * 12);
-    let (destinations, _cities) = state
+    let (destinations, cities) = state
         .schedule
         .find_destinations(&date, &origin, &filters)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -104,7 +126,10 @@ pub async fn get_destinations(
         })
         .collect();
 
+    let city_items = cities.into_iter().map(CityResponseItem::from).collect();
+
     Ok(Json(DestinationsResponse {
         destinations: items,
+        cities: city_items,
     }))
 }

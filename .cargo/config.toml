@@ -6,3 +6,4 @@ debug = true
 SERVER_PORT="3001"
 ALLOW_ORIGIN="http://127.0.0.1:5173"
 DATA_LOCATION="./data"
+NOMINATIM_URL_KEY="http://localhost:8080"

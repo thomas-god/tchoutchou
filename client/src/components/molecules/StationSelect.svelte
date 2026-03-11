@@ -1,15 +1,19 @@
 <script lang="ts">
-	import { autocompleteStation, type Station } from '$lib/remote/station.remote';
+	import {
+		autocompleteStation,
+		type AutocompleteStation,
+		type City
+	} from '$lib/remote/destinations.remote';
 
-	let { station = $bindable(), label }: { station: Station | undefined; label: string } = $props();
+	let { city = $bindable(), label }: { city: City | undefined; label: string } = $props();
 
 	let query = $state('');
-	let options: Station[] = $state([]);
+	let options: AutocompleteStation[] = $state([]);
 
 	let timer: any;
 
 	const debounce = () => {
-		station = undefined;
+		city = undefined;
 		clearTimeout(timer);
 
 		timer = setTimeout(async () => {
@@ -28,14 +32,14 @@
 			class="input w-full pl-2 text-base-content input-info"
 		/>
 	</label>
-	{#if station === undefined && options.length > 0}
+	{#if city === undefined && options.length > 0}
 		<ul class="flex flex-col items-start rounded-b-lg bg-base-100 p-2">
 			{#each options as option (option.id)}
 				<li class="p-0.5 hover:bg-base-300">
 					<button
 						class="text-start"
 						onclick={() => {
-							station = option;
+							city = { ...option, country: '', lat: 0, lon: 0 } as City;
 							query = option.name;
 						}}
 					>

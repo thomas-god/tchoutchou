@@ -5,16 +5,13 @@
 	import 'leaflet.markercluster';
 	import 'leaflet.markercluster/dist/MarkerCluster.css';
 	import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
-	import type {
-		BackendDestinationResult,
-		BackendStation
-	} from '$lib/remote/backend-schedules.remote';
+	import type { DestinationResult, City } from '$lib/remote/destinations.remote';
 
 	interface Props {
-		origin: BackendStation | undefined;
-		destinations: BackendDestinationResult[];
+		origin: City | undefined;
+		destinations: DestinationResult[];
 		bounds: { lat: { min: number; max: number }; lon: { min: number; max: number } } | undefined;
-		selectedDestination: undefined | BackendDestinationResult;
+		selectedDestination: undefined | DestinationResult;
 	}
 
 	let { origin, destinations, selectedDestination, bounds }: Props = $props();

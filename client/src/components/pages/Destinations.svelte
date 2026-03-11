@@ -1,15 +1,9 @@
 <script lang="ts">
 	import { displayDuration } from '$lib';
 	import { fade } from 'svelte/transition';
-	import {
-		autocompleteBackendStation,
-		fetchBackendDestinations
-	} from '$lib/remote/backend-schedules.remote';
-	import type {
-		BackendDestinationResult,
-		BackendStation
-	} from '$lib/remote/backend-schedules.remote';
-	import BackendTripsMap from './BackendTripsMap.svelte';
+	import { autocompleteStation, fetchDestinations } from '$lib/remote/destinations.remote';
+	import type { DestinationResult, City } from '$lib/remote/destinations.remote';
+	import DestinationsMap from '../organisms/DestinationsMap.svelte';
 
 	let stop: { id: number; name: string } | undefined = $state(undefined);
 	let maxConnections: number = $state(0);
@@ -19,11 +13,10 @@
 	let autocompleteOptions: { id: number; name: string }[] = $state([]);
 	let autocompleteTimer: any;
 
-	let result:
-		| { origin: BackendStation | null; destinations: BackendDestinationResult[] }
-		| undefined = $state(undefined);
+	let result: { origin: City | null; destinations: DestinationResult[] } | undefined =
+		$state(undefined);
 	let loading = $state(false);
-	let selectedDestination: BackendDestinationResult | undefined = $state(undefined);
+	let selectedDestination: DestinationResult | undefined = $state(undefined);
 	let showResults = $state(false);
 
 	const debounce = () => {
@@ -31,7 +24,7 @@
 		clearTimeout(autocompleteTimer);
 		autocompleteTimer = setTimeout(async () => {
 			if (query.length >= 2) {
-				autocompleteOptions = await autocompleteBackendStation(query);
+				autocompleteOptions = await autocompleteStation(query);
 			} else {
 				autocompleteOptions = [];
 			}
@@ -53,14 +46,12 @@
 		selectedDestination = undefined;
 		let cancelled = false;
 
-		fetchBackendDestinations({ from: currentStop.id, maxConnections: currentMaxConnections }).then(
-			(r) => {
-				if (!cancelled) {
-					result = r;
-					loading = false;
-				}
+		fetchDestinations({ from: currentStop.id, maxConnections: currentMaxConnections }).then((r) => {
+			if (!cancelled) {
+				result = r;
+				loading = false;
 			}
-		);
+		});
 
 		return () => {
 			cancelled = true;
@@ -88,7 +79,7 @@
 </script>
 
 <div class="relative h-lvh w-full">
-	<BackendTripsMap
+	<DestinationsMap
 		origin={result?.origin ?? undefined}
 		destinations={result?.destinations ?? []}
 		{selectedDestination}

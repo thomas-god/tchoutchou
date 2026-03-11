@@ -1,18 +1,12 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
 	import { displayDuration } from '$lib';
-	import type {
-		BackendDestinationResult,
-		BackendStation
-	} from '$lib/remote/backend-schedules.remote';
-	import BackendTripsMap from './BackendTripsMap.svelte';
+	import type { DestinationResult, City } from '$lib/remote/destinations.remote';
+	import DestinationsMap from './DestinationsMap.svelte';
 
-	let {
-		origin,
-		destinations
-	}: { origin: BackendStation; destinations: BackendDestinationResult[] } = $props();
+	let { origin, destinations }: { origin: City; destinations: DestinationResult[] } = $props();
 
-	let selectedDestination: undefined | BackendDestinationResult = $state(undefined);
+	let selectedDestination: undefined | DestinationResult = $state(undefined);
 
 	let sortedDestinations = $derived([...destinations].sort((a, b) => a.duration - b.duration));
 
@@ -56,7 +50,7 @@
 			{/each}
 		</div>
 		<div class="max-h-112 min-h-112 @max-[500px]:h-96 @min-[500px]:w-full">
-			<BackendTripsMap {origin} {destinations} {selectedDestination} {bounds} />
+			<DestinationsMap {origin} {destinations} {selectedDestination} {bounds} />
 		</div>
 	</div>
 </div>
