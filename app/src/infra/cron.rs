@@ -11,13 +11,13 @@ use chrono::{DateTime, NaiveTime, TimeZone, Utc};
 use tokio::time::{Instant, sleep_until};
 
 use crate::{
-    app::schedule::ScheduleService,
+    app::schedulev2::ScheduleService,
     infra::{
         graph_cache::InMemoryGraphCache,
         importers::gtfs::{
             GTFSRouteType, fetcher::GTFSFetcher, importer::GTFSImporter, parsers::GTFSParser,
         },
-        repository::sqlite::SqliteRepository,
+        repository::{geospatial::NominatimGeospatialRepository, sqlitev2::SqliteRepository},
     },
 };
 
@@ -47,7 +47,11 @@ impl CronServiceBuilder {
     /// returning a ready-to-run [`CronService`].
     pub fn build(
         self,
-        schedule_service: ScheduleService<SqliteRepository, InMemoryGraphCache>,
+        schedule_service: ScheduleService<
+            SqliteRepository,
+            InMemoryGraphCache,
+            NominatimGeospatialRepository,
+        >,
     ) -> CronService {
         let mut service = CronService {
             jobs: Vec::new(),
@@ -73,7 +77,7 @@ impl CronServiceBuilder {
 
                 let importer = GTFSImporter::from_parser(&parser, "sncf", &types);
 
-                svc.ingest(importer.as_data())
+                svc.ingest(importer.as_data()).await
                     .map_err(|_| anyhow::anyhow!("ingest sncf failed"))?;
 
                 Ok(())
@@ -98,6 +102,7 @@ impl CronServiceBuilder {
                 let importer = GTFSImporter::from_parser(&parser, "db", &types);
 
                 svc.ingest(importer.as_data())
+                    .await
                     .map_err(|_| anyhow::anyhow!("ingest db failed"))?;
 
                 Ok(())
@@ -123,6 +128,7 @@ impl CronServiceBuilder {
                 let importer = GTFSImporter::from_parser(&parser, "renfe", &types);
 
                 svc.ingest(importer.as_data())
+                    .await
                     .map_err(|_| anyhow::anyhow!("ingest renfe failed"))?;
 
                 Ok(())
@@ -134,9 +140,7 @@ impl CronServiceBuilder {
         service.register("warm-cache", Duration::from_mins(5), move || {
             let svc = svc.clone();
             async move {
-                let _ = svc
-                    .graph(&format!("{}", Utc::now().format("%Y%m%d")))
-                    .map_err(|_| anyhow::anyhow!("warming graph cache"))?;
+                let _ = svc.warm(&format!("{}", Utc::now().format("%Y%m%d")));
 
                 Ok(())
             }

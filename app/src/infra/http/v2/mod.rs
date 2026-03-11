@@ -15,7 +15,7 @@ use crate::{
     infra::{
         config::Config,
         graph_cache::InMemoryGraphCache,
-        http::v2::handlersv2::{autocomplete_station, get_destinations},
+        http::v2::handlersv2::{autocomplete_city, get_destinations},
         repository::{geospatial::NominatimGeospatialRepository, sqlitev2::SqliteRepository},
     },
 };
@@ -87,6 +87,6 @@ impl HttpServerv2 {
 
 fn routes() -> Router<AppState> {
     Router::new()
-        .route("/stations/autocomplete", get(autocomplete_station))
+        .route("/stations/autocomplete", get(autocomplete_city))
         .route("/destinations", get(get_destinations))
 }
