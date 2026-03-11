@@ -124,11 +124,11 @@ pub trait ScheduleDataRepository {
     fn search_cities_by_name(&self, query: &str, limit: usize) -> Vec<City>;
 }
 
-pub trait GeospatialRepository {
+pub trait GeospatialRepository: Clone + Send + Sync + 'static {
     fn match_stations_to_cities(
         &self,
         stations: &[ImportedStation],
-    ) -> HashMap<ImportedStationId, CityInformation>;
+    ) -> impl Future<Output = HashMap<ImportedStationId, CityInformation>> + Send;
 }
 
 /// Application service that aggregates data from various importers, persists it through a
@@ -163,8 +163,11 @@ impl<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository>
         }
     }
 
-    pub fn ingest(&mut self, data: TrainDataToImport) -> Result<ScheduleDataImportResult, ()> {
-        let city_mapping = self.geo.match_stations_to_cities(data.stations());
+    pub async fn ingest(
+        &mut self,
+        data: TrainDataToImport,
+    ) -> Result<ScheduleDataImportResult, ()> {
+        let city_mapping = self.geo.match_stations_to_cities(data.stations()).await;
 
         let result = self.repository.lock().map_err(|_| ()).map(|mut repo| {
             repo.import_timetable(ScheduleDataToImport {
@@ -276,7 +279,7 @@ pub mod test_utils {
         }
 
         impl GeospatialRepository for GeospatialRepository {
-             fn match_stations_to_cities(
+             async fn match_stations_to_cities(
                 &self,
                 stations: &[ImportedStation],
             ) -> HashMap<ImportedStationId, CityInformation>;

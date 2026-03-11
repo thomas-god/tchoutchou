@@ -114,11 +114,11 @@ impl GTFSImporter {
             .iter()
             .filter(|t| {
                 if !known_ids.contains(t.route_id()) {
-                    tracing::warn!(
-                        trip_id = %t.trip_id().as_str(),
-                        route_id = %t.route_id().as_str(),
-                        "dropping trip: route_id not found in routes.txt"
-                    );
+                    // tracing::warn!(
+                    //     trip_id = %t.trip_id().as_str(),
+                    //     route_id = %t.route_id().as_str(),
+                    //     "dropping trip: route_id not found in routes.txt"
+                    // );
                     return false;
                 }
                 allowed_ids.contains(t.route_id())

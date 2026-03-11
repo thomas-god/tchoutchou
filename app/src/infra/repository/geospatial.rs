@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use rusqlite::Connection;
 use serde::Deserialize;
@@ -24,10 +27,11 @@ struct NominatimResponse {
     address: NominatimAddress,
 }
 
+#[derive(Clone)]
 pub struct NominatimGeospatialRepository {
-    client: reqwest::blocking::Client,
+    client: reqwest::Client,
     base_url: String,
-    cache: Mutex<Connection>,
+    cache: Arc<Mutex<Connection>>,
 }
 
 impl NominatimGeospatialRepository {
@@ -47,9 +51,9 @@ impl NominatimGeospatialRepository {
             );",
         )?;
         Ok(Self {
-            client: reqwest::blocking::Client::new(),
+            client: reqwest::Client::new(),
             base_url: base_url.to_string(),
-            cache: Mutex::new(conn),
+            cache: Arc::new(Mutex::new(conn)),
         })
     }
 
@@ -78,7 +82,7 @@ impl NominatimGeospatialRepository {
         }
     }
 
-    fn reverse_geocode(&self, lat: f64, lon: f64) -> Option<CityInformation> {
+    async fn reverse_geocode(&self, lat: f64, lon: f64) -> Option<CityInformation> {
         if let Some(cached) = self.lookup_cache(lat, lon) {
             return Some(cached);
         }
@@ -95,6 +99,7 @@ impl NominatimGeospatialRepository {
                 ("addressdetails", "1".to_string()),
             ])
             .send()
+            .await
             .ok()?;
 
         if !response.status().is_success() {
@@ -107,7 +112,7 @@ impl NominatimGeospatialRepository {
             return None;
         }
 
-        let nominatim: NominatimResponse = response.json().ok()?;
+        let nominatim: NominatimResponse = response.json().await.ok()?;
         let city_lat = nominatim.lat.parse::<f64>().ok()?;
         let city_lon = nominatim.lon.parse::<f64>().ok()?;
         let addr = nominatim.address;
@@ -128,14 +133,14 @@ fn extract_city_name(addr: &NominatimAddress) -> Option<String> {
 }
 
 impl GeospatialRepository for NominatimGeospatialRepository {
-    fn match_stations_to_cities(
+    async fn match_stations_to_cities(
         &self,
         stations: &[ImportedStation],
     ) -> HashMap<ImportedStationId, CityInformation> {
         let mut result = HashMap::new();
 
         for station in stations {
-            let city = self.reverse_geocode(station.lat(), station.lon());
+            let city = self.reverse_geocode(station.lat(), station.lon()).await;
 
             if let Some(info) = city {
                 result.insert(station.id().clone(), info);
@@ -201,19 +206,20 @@ mod tests {
         )
     }
 
-    #[test]
-    fn reverse_geocode_returns_city_on_success() {
-        let mut server = Server::new();
+    #[tokio::test]
+    async fn reverse_geocode_returns_city_on_success() {
+        let mut server = Server::new_async().await;
         let mock = server
             .mock("GET", "/reverse")
             .match_query(Matcher::Any)
             .with_status(200)
             .with_header("Content-Type", "application/json")
             .with_body(nominatim_body("Lyon", "France"))
-            .create();
+            .create_async()
+            .await;
 
         let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
-        let result = repo.reverse_geocode(45.75, 4.85).unwrap();
+        let result = repo.reverse_geocode(45.75, 4.85).await.unwrap();
 
         assert_eq!(result.name(), "Lyon");
         assert_eq!(result.country(), "France");
@@ -222,37 +228,39 @@ mod tests {
         mock.assert();
     }
 
-    #[test]
-    fn reverse_geocode_returns_none_on_http_error() {
-        let mut server = Server::new();
+    #[tokio::test]
+    async fn reverse_geocode_returns_none_on_http_error() {
+        let mut server = Server::new_async().await;
         server
             .mock("GET", "/reverse")
             .match_query(Matcher::Any)
             .with_status(500)
-            .create();
+            .create_async()
+            .await;
 
         let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
-        assert!(repo.reverse_geocode(45.75, 4.85).is_none());
+        assert!(repo.reverse_geocode(45.75, 4.85).await.is_none());
     }
 
-    #[test]
-    fn reverse_geocode_returns_none_when_city_missing_from_address() {
-        let mut server = Server::new();
+    #[tokio::test]
+    async fn reverse_geocode_returns_none_when_city_missing_from_address() {
+        let mut server = Server::new_async().await;
         server
             .mock("GET", "/reverse")
             .match_query(Matcher::Any)
             .with_status(200)
             .with_header("Content-Type", "application/json")
             .with_body(r#"{"address":{"country":"France"}}"#)
-            .create();
+            .create_async()
+            .await;
 
         let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
-        assert!(repo.reverse_geocode(45.75, 4.85).is_none());
+        assert!(repo.reverse_geocode(45.75, 4.85).await.is_none());
     }
 
-    #[test]
-    fn cache_hit_skips_http_call() {
-        let mut server = Server::new();
+    #[tokio::test]
+    async fn cache_hit_skips_http_call() {
+        let mut server = Server::new_async().await;
         let mock = server
             .mock("GET", "/reverse")
             .match_query(Matcher::Any)
@@ -260,19 +268,20 @@ mod tests {
             .with_header("Content-Type", "application/json")
             .with_body(nominatim_body("Lyon", "France"))
             .expect(1)
-            .create();
+            .create_async()
+            .await;
 
         let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
-        let first = repo.reverse_geocode(45.75, 4.85).unwrap();
-        let second = repo.reverse_geocode(45.75, 4.85).unwrap();
+        let first = repo.reverse_geocode(45.75, 4.85).await.unwrap();
+        let second = repo.reverse_geocode(45.75, 4.85).await.unwrap();
 
         assert_eq!(first.name(), second.name());
         mock.assert();
     }
 
-    #[test]
-    fn cache_hit_preserves_city_coordinates() {
-        let mut server = Server::new();
+    #[tokio::test]
+    async fn cache_hit_preserves_city_coordinates() {
+        let mut server = Server::new_async().await;
         server
             .mock("GET", "/reverse")
             .match_query(Matcher::Any)
@@ -280,29 +289,31 @@ mod tests {
             .with_header("Content-Type", "application/json")
             .with_body(nominatim_body("Lyon", "France"))
             .expect(1)
-            .create();
+            .create_async()
+            .await;
 
         let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
-        let _ = repo.reverse_geocode(45.70, 4.80).unwrap();
-        let cached = repo.reverse_geocode(45.70, 4.80).unwrap();
+        let _ = repo.reverse_geocode(45.70, 4.80).await.unwrap();
+        let cached = repo.reverse_geocode(45.70, 4.80).await.unwrap();
 
         assert_eq!(cached.lat(), 45.75);
         assert_eq!(cached.lon(), 4.85);
     }
 
-    #[test]
-    fn reverse_geocode_returns_none_when_lat_lon_unparseable() {
-        let mut server = Server::new();
+    #[tokio::test]
+    async fn reverse_geocode_returns_none_when_lat_lon_unparseable() {
+        let mut server = Server::new_async().await;
         server
             .mock("GET", "/reverse")
             .match_query(Matcher::Any)
             .with_status(200)
             .with_header("Content-Type", "application/json")
             .with_body(r#"{"lat":"N/A","lon":"N/A","address":{"city":"Lyon","country":"France"}}"#)
-            .create();
+            .create_async()
+            .await;
 
         let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
-        assert!(repo.reverse_geocode(45.75, 4.85).is_none());
+        assert!(repo.reverse_geocode(45.75, 4.85).await.is_none());
     }
 
     // ---- match_stations_to_cities ----
@@ -316,24 +327,27 @@ mod tests {
         )
     }
 
-    #[test]
-    fn match_stations_skips_unresolvable_stations() {
-        let mut server = Server::new();
+    #[tokio::test]
+    async fn match_stations_skips_unresolvable_stations() {
+        let mut server = Server::new_async().await;
         server
             .mock("GET", "/reverse")
             .match_query(Matcher::Any)
             .with_status(500)
-            .create();
+            .create_async()
+            .await;
 
         let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
-        let result = repo.match_stations_to_cities(&[station("A", 0.0, 0.0)]);
+        let result = repo
+            .match_stations_to_cities(&[station("A", 0.0, 0.0)])
+            .await;
 
         assert!(result.is_empty());
     }
 
-    #[test]
-    fn match_stations_keys_by_station_id() {
-        let mut server = Server::new();
+    #[tokio::test]
+    async fn match_stations_keys_by_station_id() {
+        let mut server = Server::new_async().await;
         server
             .mock("GET", "/reverse")
             .match_query(Matcher::Any)
@@ -341,11 +355,12 @@ mod tests {
             .with_header("Content-Type", "application/json")
             .with_body(nominatim_body("Lyon", "France"))
             .expect(2)
-            .create();
+            .create_async()
+            .await;
 
         let stations = vec![station("A", 45.75, 4.85), station("B", 45.76, 4.86)];
         let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
-        let result = repo.match_stations_to_cities(&stations);
+        let result = repo.match_stations_to_cities(&stations).await;
 
         assert_eq!(result.len(), 2);
         assert!(result.contains_key(&ImportedStationId::from("A".to_owned())));

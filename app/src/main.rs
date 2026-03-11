@@ -94,6 +94,7 @@ async fn _main_v2() -> anyhow::Result<()> {
 
     schedule_service
         .ingest(importer.as_data())
+        .await
         .map_err(|_| anyhow::anyhow!("ingest renfe failed"))?;
 
     let http_server = HttpServerv2::new(config, schedule_service).await?;
