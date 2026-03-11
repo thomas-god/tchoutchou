@@ -406,6 +406,36 @@ impl ScheduleDataRepository for SqliteRepository {
             .filter_map(|row| row.ok());
         HashMap::from_iter(rows)
     }
+
+    fn cities_by_ids(&self, ids: &[CityId]) -> Vec<City> {
+        if ids.is_empty() {
+            return vec![];
+        }
+
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let query = format!(
+            "SELECT id, country, name, lat, lon FROM t_cities WHERE id IN ({}) ORDER BY id",
+            placeholders
+        );
+
+        let mut stmt = self
+            .conn
+            .prepare(&query)
+            .expect("cities_by_ids: prepare failed");
+        let params: Vec<i64> = ids.iter().map(|id| id.as_i64()).collect();
+
+        stmt.query_map(rusqlite::params_from_iter(params), |row| {
+            let id: i64 = row.get(0)?;
+            let country: String = row.get(1)?;
+            let name: String = row.get(2)?;
+            let lat: f64 = row.get(3)?;
+            let lon: f64 = row.get(4)?;
+            Ok(City::new(CityId::from(id), name, country, lat, lon))
+        })
+        .expect("cities_by_ids: query failed")
+        .map(|r| r.expect("cities_by_ids: row mapping failed"))
+        .collect()
+    }
 }
 
 #[cfg(test)]
@@ -738,5 +768,113 @@ mod test_sqlite {
         assert_eq!(city.country(), "France");
         assert_eq!(city.lat(), 48.8566);
         assert_eq!(city.lon(), 2.3522);
+    }
+
+    #[test]
+    fn test_cities_by_ids_returns_empty_for_empty_input() {
+        let repo = make_repo();
+        let cities = repo.cities_by_ids(&[]);
+        assert_eq!(cities.len(), 0);
+    }
+
+    #[test]
+    fn test_cities_by_ids_returns_requested_cities() {
+        let mut repo = make_repo();
+        let data = data_to_import(
+            vec![station("A"), station("B"), station("C")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([
+                (
+                    ImportedStationId::from("A".to_string()),
+                    CityInformation::new(
+                        "Paris".to_string(),
+                        "France".to_string(),
+                        48.8566,
+                        2.3522,
+                    ),
+                ),
+                (
+                    ImportedStationId::from("B".to_string()),
+                    CityInformation::new("London".to_string(), "UK".to_string(), 51.5074, -0.1278),
+                ),
+                (
+                    ImportedStationId::from("C".to_string()),
+                    CityInformation::new(
+                        "Berlin".to_string(),
+                        "Germany".to_string(),
+                        52.5200,
+                        13.4050,
+                    ),
+                ),
+            ]),
+        );
+
+        repo.import_timetable(data);
+
+        // Get all cities first to know their IDs
+        let all_cities = repo.all_cities();
+        assert_eq!(all_cities.len(), 3);
+
+        // Request specific cities by ID
+        let requested_ids: Vec<CityId> = all_cities.iter().take(2).map(|c| *c.id()).collect();
+        let cities = repo.cities_by_ids(&requested_ids);
+
+        assert_eq!(cities.len(), 2);
+        assert!(
+            cities
+                .iter()
+                .any(|c| c.name() == "Paris" || c.name() == "London" || c.name() == "Berlin")
+        );
+    }
+
+    #[test]
+    fn test_cities_by_ids_handles_nonexistent_ids() {
+        let repo = make_repo();
+
+        // Request cities that don't exist
+        let cities = repo.cities_by_ids(&[CityId::from(999), CityId::from(1000)]);
+
+        assert_eq!(cities.len(), 0);
+    }
+
+    #[test]
+    fn test_cities_by_ids_returns_in_order() {
+        let mut repo = make_repo();
+        let data = data_to_import(
+            vec![station("A"), station("B")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([
+                (
+                    ImportedStationId::from("A".to_string()),
+                    CityInformation::new(
+                        "Paris".to_string(),
+                        "France".to_string(),
+                        48.8566,
+                        2.3522,
+                    ),
+                ),
+                (
+                    ImportedStationId::from("B".to_string()),
+                    CityInformation::new("London".to_string(), "UK".to_string(), 51.5074, -0.1278),
+                ),
+            ]),
+        );
+
+        repo.import_timetable(data);
+
+        let all_cities = repo.all_cities();
+        let city_ids: Vec<CityId> = all_cities.iter().map(|c| *c.id()).collect();
+
+        let cities = repo.cities_by_ids(&city_ids);
+
+        // Verify cities are returned in ID order
+        assert_eq!(cities.len(), 2);
+        for i in 1..cities.len() {
+            assert!(cities[i - 1].id().as_i64() <= cities[i].id().as_i64());
+        }
     }
 }

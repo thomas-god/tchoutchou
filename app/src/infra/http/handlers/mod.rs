@@ -85,7 +85,7 @@ pub async fn get_destinations(
 
     let origin = CityId::from(from);
     let filters = DestinationFilters::new(max_connections.unwrap_or(1), 900, 3600 * 12);
-    let destinations = state
+    let (destinations, _cities) = state
         .schedule
         .find_destinations(&date, &origin, &filters)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

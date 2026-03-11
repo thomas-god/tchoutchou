@@ -160,6 +160,10 @@ impl Trip {
         }
     }
 
+    pub fn visited_city_ids(&self) -> &[CityId] {
+        &self.visited_cities
+    }
+
     fn new(destination: CityId, legs: Vec<TripLeg>) -> Self {
         let arrival = legs
             .iter()
@@ -652,6 +656,52 @@ mod test_destination_struct {
         );
 
         assert_eq!(destination.intermediary_city_ids(), &[CityId(2), CityId(3)]);
+    }
+
+    #[test]
+    fn test_visited_city_ids_no_connection() {
+        // Single trip: visited = [origin, dest]
+        let destination = Trip::new(
+            CityId(2),
+            vec![TripLeg::new(CityId(1), CityId(2), 100, 200)],
+        );
+
+        assert_eq!(destination.visited_city_ids(), &[CityId(1), CityId(2)]);
+    }
+
+    #[test]
+    fn test_visited_city_ids_one_connection() {
+        // Two trips: visited = [1, 2, 3]
+        let destination = Trip::new(
+            CityId(3),
+            vec![
+                TripLeg::new(CityId(1), CityId(2), 100, 200),
+                TripLeg::new(CityId(2), CityId(3), 1200, 1300),
+            ],
+        );
+
+        assert_eq!(
+            destination.visited_city_ids(),
+            &[CityId(1), CityId(2), CityId(3)]
+        );
+    }
+
+    #[test]
+    fn test_visited_city_ids_two_connections() {
+        // Three trips: visited = [1, 2, 3, 4]
+        let destination = Trip::new(
+            CityId(4),
+            vec![
+                TripLeg::new(CityId(1), CityId(2), 100, 200),
+                TripLeg::new(CityId(2), CityId(3), 1200, 1300),
+                TripLeg::new(CityId(3), CityId(4), 2300, 2400),
+            ],
+        );
+
+        assert_eq!(
+            destination.visited_city_ids(),
+            &[CityId(1), CityId(2), CityId(3), CityId(4)]
+        );
     }
 
     #[test]

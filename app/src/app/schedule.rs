@@ -122,6 +122,9 @@ pub trait ScheduleDataRepository {
     /// Return up to `limit` internal stations whose name contains `query`
     /// (case-insensitive), ordered alphabetically. Intended for autocomplete.
     fn search_cities_by_name(&self, query: &str, limit: usize) -> Vec<City>;
+
+    /// Return City objects for the given city IDs.
+    fn cities_by_ids(&self, ids: &[CityId]) -> Vec<City>;
 }
 
 /// A thread-safe cache mapping date strings (`YYYYMMDD`) to pre-built [`Graph`]s.
@@ -234,12 +237,26 @@ impl<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository>
         date: &str,
         origin: &CityId,
         filters: &DestinationFilters,
-    ) -> Result<Vec<Trip>, ()> {
+    ) -> Result<(Vec<Trip>, Vec<City>), ()> {
         let graph = self.graph(date)?;
 
         let destinations = find_trips(origin, &graph, filters);
 
-        Ok(destinations)
+        let mut city_ids: Vec<CityId> = vec![];
+        for trip in &destinations {
+            city_ids.extend_from_slice(trip.visited_city_ids());
+        }
+        city_ids.sort();
+        city_ids.dedup();
+
+        // Fetch city information
+        let cities = self
+            .repository
+            .lock()
+            .map_err(|_| ())
+            .map(|repo| repo.cities_by_ids(&city_ids))?;
+
+        Ok((destinations, cities))
     }
 
     /// Build a [`Graph`] from trips active on `date` (format `YYYYMMDD`).
@@ -326,6 +343,7 @@ pub mod test_utils {
             fn legs_for_date(&self, date: &str) -> Vec<InternalTripLeg>;
             fn stations_to_city(&self) -> HashMap<InternalStationId, CityId>;
             fn search_cities_by_name(&self, query: &str, limit: usize) -> Vec<City>;
+            fn cities_by_ids(&self, ids: &[CityId]) -> Vec<City>;
         }
     }
 
@@ -521,5 +539,135 @@ mod tests {
 
         let g_after = service.graph(TEST_DATE).expect("after ingest");
         assert_eq!(g_after.legs_from(CityId::from(1)).len(), 0);
+    }
+
+    // ---- find_destinations ----
+
+    #[test]
+    fn find_destinations_returns_trips_and_cities() {
+        let trips = vec![
+            InternalTripLeg::new(siid(1), siid(2), 100, 200),
+            InternalTripLeg::new(siid(2), siid(3), 1200, 1300),
+        ];
+        let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2)), (siid(3), cid(3))]);
+        let paris = City::new(
+            cid(1),
+            "Paris".to_string(),
+            "France".to_string(),
+            48.8566,
+            2.3522,
+        );
+        let london = City::new(
+            cid(2),
+            "London".to_string(),
+            "UK".to_string(),
+            51.5074,
+            -0.1278,
+        );
+        let berlin = City::new(
+            cid(3),
+            "Berlin".to_string(),
+            "Germany".to_string(),
+            52.5200,
+            13.4050,
+        );
+
+        let mut mock = MockScheduleDataRepository::new();
+        mock.expect_legs_for_date()
+            .withf(|d| d == TEST_DATE)
+            .return_const(trips);
+        mock.expect_stations_to_city().return_const(mappings);
+        mock.expect_cities_by_ids().times(1).returning(move |ids| {
+            // Verify that the requested IDs include origin and all visited cities
+            assert!(ids.contains(&cid(1))); // origin
+            assert!(ids.contains(&cid(2))); // direct destination
+            vec![paris.clone(), london.clone(), berlin.clone()]
+        });
+
+        let geo = MockGeospatialRepository::new();
+        let service = make_service(mock, geo);
+
+        let (trips, cities) = service
+            .find_destinations(TEST_DATE, &cid(1), &DestinationFilters::default())
+            .expect("find_destinations should succeed");
+
+        assert_eq!(trips.len(), 2); // Direct trip to city 2, and one-connection trip to city 3
+        assert_eq!(cities.len(), 3); // Paris, London, Berlin
+        assert!(cities.iter().any(|c| c.name() == "Paris"));
+        assert!(cities.iter().any(|c| c.name() == "London"));
+        assert!(cities.iter().any(|c| c.name() == "Berlin"));
+    }
+
+    #[test]
+    fn find_destinations_includes_origin_city() {
+        let trips = vec![InternalTripLeg::new(siid(1), siid(2), 100, 200)];
+        let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2))]);
+        let paris = City::new(
+            cid(1),
+            "Paris".to_string(),
+            "France".to_string(),
+            48.8566,
+            2.3522,
+        );
+        let london = City::new(
+            cid(2),
+            "London".to_string(),
+            "UK".to_string(),
+            51.5074,
+            -0.1278,
+        );
+
+        let mut mock = MockScheduleDataRepository::new();
+        mock.expect_legs_for_date()
+            .withf(|d| d == TEST_DATE)
+            .return_const(trips);
+        mock.expect_stations_to_city().return_const(mappings);
+        mock.expect_cities_by_ids().times(1).returning(move |ids| {
+            // Origin must be in the requested IDs
+            assert!(ids.contains(&cid(1)));
+            vec![paris.clone(), london.clone()]
+        });
+
+        let geo = MockGeospatialRepository::new();
+        let service = make_service(mock, geo);
+
+        let (_, cities) = service
+            .find_destinations(TEST_DATE, &cid(1), &DestinationFilters::default())
+            .expect("find_destinations should succeed");
+
+        assert!(cities.iter().any(|c| c.name() == "Paris")); // Origin city included
+    }
+
+    #[test]
+    fn find_destinations_deduplicates_city_ids() {
+        // Two trips to the same destination should not duplicate cities
+        let trips = vec![
+            InternalTripLeg::new(siid(1), siid(2), 100, 200),
+            InternalTripLeg::new(siid(1), siid(2), 300, 400),
+        ];
+        let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2))]);
+
+        let mut mock = MockScheduleDataRepository::new();
+        mock.expect_legs_for_date()
+            .withf(|d| d == TEST_DATE)
+            .return_const(trips);
+        mock.expect_stations_to_city().return_const(mappings);
+        mock.expect_cities_by_ids().times(1).returning(|ids| {
+            // Should only request each unique city ID once
+            let mut unique_ids = ids.to_vec();
+            unique_ids.sort();
+            unique_ids.dedup();
+            assert_eq!(
+                ids.len(),
+                unique_ids.len(),
+                "City IDs should be deduplicated"
+            );
+            vec![]
+        });
+
+        let geo = MockGeospatialRepository::new();
+        let service = make_service(mock, geo);
+
+        let _ = service.find_destinations(TEST_DATE, &cid(1), &DestinationFilters::default());
     }
 }

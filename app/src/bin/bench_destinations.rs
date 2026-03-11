@@ -119,7 +119,7 @@ fn main() -> anyhow::Result<()> {
     println!("Graph built in {}ms", graph_build_ms);
 
     let t1 = Instant::now();
-    let trips = schedule_service
+    let (trips, _cities) = schedule_service
         .find_destinations(&cli.date, &origin_id, &DestinationFilters::default())
         .expect("failed to compute trips");
     let first_ms = t1.elapsed().as_millis();
