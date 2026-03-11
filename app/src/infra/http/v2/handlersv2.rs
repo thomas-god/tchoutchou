@@ -7,7 +7,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    domain::optim::{City, CityId, DestinationFilters, find_trips},
+    domain::optim::{City, CityId, DestinationFilters},
     infra::http::v2::AppState,
 };
 
@@ -35,10 +35,10 @@ impl From<City> for AutocompleteCityResponseItem {
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct AutocompleteCityResponse {
-    pub cities: Vec<AutocompleteCityResponseItem>,
+    pub stations: Vec<AutocompleteCityResponseItem>,
 }
 
-pub async fn autocomplete_station(
+pub async fn autocomplete_city(
     State(state): State<AppState>,
     Query(QueryParameters { substring }): Query<QueryParameters>,
 ) -> Result<Json<AutocompleteCityResponse>, StatusCode> {
@@ -46,7 +46,7 @@ pub async fn autocomplete_station(
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     };
     Ok(Json(AutocompleteCityResponse {
-        cities: cities
+        stations: cities
             .into_iter()
             .map(AutocompleteCityResponseItem::from)
             .collect(),
@@ -82,14 +82,13 @@ pub async fn get_destinations(
     }): Query<DestinationsQueryParameters>,
 ) -> Result<Json<DestinationsResponse>, StatusCode> {
     let date = Utc::now().date_naive().format("%Y%m%d").to_string();
-    let graph = state
-        .schedule
-        .graph(&date)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let origin = CityId::from(from);
     let filters = DestinationFilters::new(max_connections.unwrap_or(1), 900, 3600 * 12);
-    let destinations = find_trips(&origin, &graph, &filters);
+    let destinations = state
+        .schedule
+        .find_destinations(&date, &origin, &filters)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let items = destinations
         .into_iter()

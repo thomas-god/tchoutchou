@@ -11,7 +11,7 @@ use crate::{
         ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation, ImportedStationId,
         ImportedTripLeg, TrainDataToImport, schedule::GraphCache,
     },
-    domain::optim::{City, CityId, Graph, TripLeg},
+    domain::optim::{City, CityId, DestinationFilters, Graph, Trip, TripLeg, find_trips},
 };
 
 #[derive(Debug, Clone, Constructor, PartialEq, PartialOrd)]
@@ -219,6 +219,19 @@ impl<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository>
             .map(|repo| repo.search_cities_by_name(query, limit))
     }
 
+    pub fn find_destinations(
+        &self,
+        date: &str,
+        origin: &CityId,
+        filters: &DestinationFilters,
+    ) -> Result<Vec<Trip>, ()> {
+        let graph = self.graph(date)?;
+
+        let destinations = find_trips(origin, &graph, filters);
+
+        Ok(destinations)
+    }
+
     /// Build a [`Graph`] from trips active on `date` (format `YYYYMMDD`).
     ///
     /// [`ImportedStation`]s are resolved to their canonical [`InternalStationId`] so that
@@ -226,7 +239,7 @@ impl<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository>
     ///
     /// The result is an [`Arc`] into the internal cache. Repeated calls for the same date return
     /// a new handle to the same allocation — no graph data is ever copied.
-    pub fn graph(&self, date: &str) -> Result<Arc<Graph>, ()> {
+    fn graph(&self, date: &str) -> Result<Arc<Graph>, ()> {
         // Fast path: return a cached handle without touching the repository.
         if let Some(graph) = self.graph_cache.get(date) {
             return Ok(graph);
@@ -249,6 +262,10 @@ impl<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository>
         self.graph_cache.insert(date, Arc::clone(&graph));
 
         Ok(graph)
+    }
+
+    pub fn warm(&self, date: &str) {
+        let _ = self.graph(date);
     }
 }
 
