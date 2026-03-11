@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use derive_more::{Constructor, From};
 
 pub mod schedule;
-pub mod schedulev2;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // `Imported*`` types describe the expected shapes of data to be ingested by the schedule service.

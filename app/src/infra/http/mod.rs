@@ -5,30 +5,26 @@ use axum::{
         HeaderValue, Method,
         header::{CONTENT_TYPE, COOKIE, SET_COOKIE},
     },
-    routing::{get, patch},
+    routing::get,
 };
 use tokio::net;
 use tower_http::cors::CorsLayer;
+
+pub mod handlers;
 
 use crate::{
     app::schedule::ScheduleService,
     infra::{
         config::Config,
         graph_cache::InMemoryGraphCache,
-        http::handlers::{
-            autocomplete_station, get_all_stations, get_destinations, get_merge_candidates,
-            remap_station,
-        },
-        repository::sqlite::SqliteRepository,
+        http::handlers::{autocomplete_city, get_destinations},
+        repository::{geospatial::NominatimGeospatialRepository, sqlite::SqliteRepository},
     },
 };
 
-mod handlers;
-pub mod v2;
-
 #[derive(Clone)]
 pub struct AppState {
-    schedule: ScheduleService<SqliteRepository, InMemoryGraphCache>,
+    schedule: ScheduleService<SqliteRepository, InMemoryGraphCache, NominatimGeospatialRepository>,
 }
 
 pub struct HttpServer {
@@ -39,7 +35,11 @@ pub struct HttpServer {
 impl HttpServer {
     pub async fn new(
         config: Config,
-        schedule_service: ScheduleService<SqliteRepository, InMemoryGraphCache>,
+        schedule_service: ScheduleService<
+            SqliteRepository,
+            InMemoryGraphCache,
+            NominatimGeospatialRepository,
+        >,
     ) -> anyhow::Result<Self> {
         let trace_layer = tower_http::trace::TraceLayer::new_for_http().make_span_with(
             |request: &axum::extract::Request<_>| {
@@ -87,9 +87,6 @@ impl HttpServer {
 
 fn routes() -> Router<AppState> {
     Router::new()
-        .route("/stations", get(get_all_stations))
-        .route("/stations/autocomplete", get(autocomplete_station))
-        .route("/stations/nearby", get(get_merge_candidates))
-        .route("/stations/mapping", patch(remap_station))
+        .route("/stations/autocomplete", get(autocomplete_city))
         .route("/destinations", get(get_destinations))
 }

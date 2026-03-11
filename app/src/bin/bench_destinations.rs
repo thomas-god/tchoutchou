@@ -2,8 +2,11 @@ use std::{fs::OpenOptions, io::Write, time::Instant};
 
 use app::{
     app::schedule::ScheduleService,
-    domain::optim::{CityId, DestinationFilters, find_trips},
-    infra::{graph_cache::InMemoryGraphCache, repository::sqlite::SqliteRepository},
+    domain::optim::{CityId, DestinationFilters},
+    infra::{
+        graph_cache::InMemoryGraphCache,
+        repository::{geospatial::NominatimGeospatialRepository, sqlite::SqliteRepository},
+    },
 };
 use clap::Parser;
 use rusqlite::Connection;
@@ -104,23 +107,31 @@ fn main() -> anyhow::Result<()> {
     );
 
     let repo = SqliteRepository::open(&cli.db)?;
-    let schedule_service = ScheduleService::new(repo, InMemoryGraphCache::default());
+    let schedule_service = ScheduleService::new(
+        repo,
+        InMemoryGraphCache::default(),
+        NominatimGeospatialRepository::new("", "").expect("failed to load geospatial repository"),
+    );
 
     let t0 = Instant::now();
-    let graph = schedule_service
-        .graph(&cli.date)
-        .map_err(|_| anyhow::anyhow!("failed to build graph for date {}", cli.date))?;
+    let _graph = schedule_service.warm(&cli.date);
     let graph_build_ms = t0.elapsed().as_millis();
     println!("Graph built in {}ms", graph_build_ms);
 
     let t1 = Instant::now();
-    let trips = find_trips(&origin_id, &graph, &DestinationFilters::default());
+    let trips = schedule_service
+        .find_destinations(&cli.date, &origin_id, &DestinationFilters::default())
+        .expect("failed to compute trips");
     let first_ms = t1.elapsed().as_millis();
 
     let mut samples_ms: Vec<u128> = vec![first_ms];
     for _ in 1..cli.runs {
         let t = Instant::now();
-        find_trips(&origin_id, &graph, &DestinationFilters::default());
+        let _ = schedule_service.find_destinations(
+            &cli.date,
+            &origin_id,
+            &DestinationFilters::default(),
+        );
         samples_ms.push(t.elapsed().as_millis());
     }
 

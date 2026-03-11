@@ -11,13 +11,13 @@ use chrono::{DateTime, NaiveTime, TimeZone, Utc};
 use tokio::time::{Instant, sleep_until};
 
 use crate::{
-    app::schedulev2::ScheduleService,
+    app::schedule::ScheduleService,
     infra::{
         graph_cache::InMemoryGraphCache,
         importers::gtfs::{
             GTFSRouteType, fetcher::GTFSFetcher, importer::GTFSImporter, parsers::GTFSParser,
         },
-        repository::{geospatial::NominatimGeospatialRepository, sqlitev2::SqliteRepository},
+        repository::{geospatial::NominatimGeospatialRepository, sqlite::SqliteRepository},
     },
 };
 

@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::app::{
     ImportedStation,
-    schedulev2::{
+    schedule::{
         CityInformation, FailureReason, GeospatialMappingFailure, GeospatialMappingResult,
         GeospatialRepository,
     },
