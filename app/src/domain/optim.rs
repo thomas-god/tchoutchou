@@ -22,6 +22,18 @@ pub struct City {
     country: String,
 }
 
+impl City {
+    pub fn id(&self) -> &CityId {
+        &self.id
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn country(&self) -> &str {
+        &self.country
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Constructor)]
 pub struct TripLeg {
     origin: CityId,
