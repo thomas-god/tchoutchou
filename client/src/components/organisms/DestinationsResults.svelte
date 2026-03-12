@@ -50,7 +50,13 @@
 			{/each}
 		</div>
 		<div class="max-h-112 min-h-112 @max-[500px]:h-96 @min-[500px]:w-full">
-			<DestinationsMap {origin} {destinations} {selectedDestination} {bounds} />
+			<DestinationsMap
+				{origin}
+				{destinations}
+				{selectedDestination}
+				{bounds}
+				onDestinationSelect={(destination) => (selectedDestination = destination)}
+			/>
 		</div>
 	</div>
 </div>

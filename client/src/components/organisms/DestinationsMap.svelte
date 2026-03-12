@@ -12,21 +12,22 @@
 		destinations: DestinationResult[];
 		bounds: { lat: { min: number; max: number }; lon: { min: number; max: number } } | undefined;
 		selectedDestination: undefined | DestinationResult;
+		onDestinationSelect?: (destination: DestinationResult) => void;
 	}
 
-	let { origin, destinations, selectedDestination, bounds }: Props = $props();
+	let { origin, destinations, selectedDestination, bounds, onDestinationSelect }: Props = $props();
 
 	let mapElement: HTMLDivElement;
 	let map: any = $state(undefined);
 
 	let markersLayer = (leaflet as any).markerClusterGroup({ chunkedLoading: true });
 	let highlightLayer = leaflet.layerGroup();
+	let routeLayer = leaflet.layerGroup();
 	let previouslyHighlighted: any = undefined;
 
 	let markers = $derived(
-		destinations.map((destination) => ({
-			id: destination.station.id,
-			marker: leaflet
+		destinations.map((destination) => {
+			const marker = leaflet
 				.circleMarker([destination.station.lat, destination.station.lon])
 				.bindPopup(
 					`${destination.station.name} (${displayDuration(destination.duration)}, ${destination.connections} correspondance(s))` +
@@ -34,7 +35,17 @@
 							? `<br>Via\u00a0: ${destination.visitedStations.map((s) => s.name).join(' \u2192 ')}`
 							: '')
 				)
-		}))
+				.on('click', () => {
+					if (onDestinationSelect) {
+						onDestinationSelect(destination);
+					}
+				});
+
+			return {
+				id: destination.station.id,
+				marker
+			};
+		})
 	);
 
 	$effect(() => {
@@ -46,6 +57,9 @@
 			markersLayer.addLayer(previouslyHighlighted);
 			previouslyHighlighted = undefined;
 		}
+
+		// Clear previous route lines
+		routeLayer.clearLayers();
 
 		if (selectedDestination !== undefined) {
 			const entry = markers.find((m) => m.id === selectedDestination!.station.id);
@@ -60,6 +74,40 @@
 					animate: true
 				});
 				entry.marker.openPopup();
+
+				// Draw route lines from origin through intermediate stations to destination
+				if (origin !== undefined) {
+					const routePoints: [number, number][] = [
+						[origin.lat, origin.lon],
+						...selectedDestination.visitedStations.map((s) => [s.lat, s.lon] as [number, number]),
+						[selectedDestination.station.lat, selectedDestination.station.lon]
+					];
+
+					// Draw the main route line
+					const routeLine = leaflet
+						.polyline(routePoints, {
+							color: '#3b82f6',
+							weight: 3,
+							opacity: 0.7,
+							smoothFactor: 1
+						})
+						.addTo(routeLayer);
+
+					// Add markers for intermediate stations
+					selectedDestination.visitedStations.forEach((station) => {
+						const intermediateMarker = leaflet
+							.circleMarker([station.lat, station.lon], {
+								radius: 5,
+								fillColor: '#f59e0b',
+								color: '#fff',
+								weight: 2,
+								opacity: 1,
+								fillOpacity: 0.8
+							})
+							.bindPopup(`${station.name}`)
+							.addTo(routeLayer);
+					});
+				}
 			}
 		}
 	});
@@ -73,6 +121,7 @@
 						'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 				})
 				.addTo(map);
+			map.addLayer(routeLayer);
 			map.addLayer(markersLayer);
 			map.addLayer(highlightLayer);
 		}

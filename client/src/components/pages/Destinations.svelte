@@ -84,6 +84,7 @@
 		destinations={result?.destinations ?? []}
 		{selectedDestination}
 		{bounds}
+		onDestinationSelect={(destination) => (selectedDestination = destination)}
 	/>
 
 	<!-- Sidebar: form always visible; results visible only on desktop (sm+) -->
