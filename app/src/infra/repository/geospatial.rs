@@ -46,12 +46,13 @@ impl NominatimGeospatialRepository {
         let conn = Connection::open(cache_path)?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS geocode_cache (
-                lat      REAL NOT NULL,
-                lon      REAL NOT NULL,
-                city     TEXT NOT NULL,
-                country  TEXT NOT NULL,
-                city_lat REAL NOT NULL,
-                city_lon REAL NOT NULL,
+                lat             REAL NOT NULL,
+                lon             REAL NOT NULL,
+                city            TEXT NOT NULL,
+                country         TEXT NOT NULL,
+                municipality    TEXT,
+                city_lat        REAL NOT NULL,
+                city_lon        REAL NOT NULL,
                 PRIMARY KEY (lat, lon)
             );",
         )?;
@@ -65,14 +66,15 @@ impl NominatimGeospatialRepository {
     fn lookup_cache(&self, lat: f64, lon: f64) -> Option<CityInformation> {
         let conn = self.cache.lock().ok()?;
         conn.query_row(
-            "SELECT city, country, city_lat, city_lon FROM geocode_cache WHERE lat = ?1 AND lon = ?2",
+            "SELECT city, country, municipality, city_lat, city_lon FROM geocode_cache WHERE lat = ?1 AND lon = ?2",
             rusqlite::params![lat, lon],
             |row| {
                 let city: String = row.get(0)?;
                 let country: String = row.get(1)?;
-                let city_lat: f64 = row.get(2)?;
-                let city_lon: f64 = row.get(3)?;
-                Ok(CityInformation::new(city, country, city_lat, city_lon))
+                let municipality: Option<String> = row.get(2)?;
+                let city_lat: f64 = row.get(3)?;
+                let city_lon: f64 = row.get(4)?;
+                Ok(CityInformation::new(city, country, municipality, city_lat, city_lon))
             },
         )
         .ok()
@@ -81,8 +83,8 @@ impl NominatimGeospatialRepository {
     fn store_cache(&self, lat: f64, lon: f64, info: &CityInformation) {
         if let Ok(conn) = self.cache.lock() {
             let _ = conn.execute(
-                "INSERT OR IGNORE INTO geocode_cache (lat, lon, city, country, city_lat, city_lon) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                rusqlite::params![lat, lon, info.name(), info.country(), info.lat(), info.lon()],
+                "INSERT OR IGNORE INTO geocode_cache (lat, lon, city, country, municipality, city_lat, city_lon) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![lat, lon, info.name(), info.country(), info.municipality(), info.lat(), info.lon()],
             );
         }
     }
@@ -134,7 +136,7 @@ impl NominatimGeospatialRepository {
         let city_name = extract_city_name(&addr).ok_or(FailureReason::MissingCityData)?;
         let country = addr.country.ok_or(FailureReason::MissingCityData)?;
 
-        let info = CityInformation::new(city_name, country, city_lat, city_lon);
+        let info = CityInformation::new(city_name, country, addr.municipality, city_lat, city_lon);
         self.store_cache(lat, lon, &info);
         Ok(info)
     }

@@ -571,11 +571,23 @@ mod test_sqlite {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".to_string(), "country".to_string(), 0.0, 0.0),
+                    CityInformation::new(
+                        "city-A".to_string(),
+                        "country".to_string(),
+                        Some("municipality".to_string()),
+                        0.0,
+                        0.0,
+                    ),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".to_string(), "country".to_string(), 0.0, 0.0),
+                    CityInformation::new(
+                        "city-B".to_string(),
+                        "country".to_string(),
+                        Some("municipality".to_string()),
+                        0.0,
+                        0.0,
+                    ),
                 ),
             ]),
         ));
@@ -592,11 +604,23 @@ mod test_sqlite {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".to_string(), "country".to_string(), 0.0, 0.0),
+                    CityInformation::new(
+                        "city-A".to_string(),
+                        "country".to_string(),
+                        Some("municipality".to_string()),
+                        0.0,
+                        0.0,
+                    ),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".to_string(), "country".to_string(), 0.0, 0.0),
+                    CityInformation::new(
+                        "city-B".to_string(),
+                        "country".to_string(),
+                        Some("municipality".to_string()),
+                        0.0,
+                        0.0,
+                    ),
                 ),
             ]),
         );
@@ -620,11 +644,23 @@ mod test_sqlite {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".to_string(), "country".to_string(), 0.0, 0.0),
+                    CityInformation::new(
+                        "city-A".to_string(),
+                        "country".to_string(),
+                        Some("municipality".to_string()),
+                        0.0,
+                        0.0,
+                    ),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".to_string(), "country".to_string(), 0.0, 0.0),
+                    CityInformation::new(
+                        "city-B".to_string(),
+                        "country".to_string(),
+                        Some("municipality".to_string()),
+                        0.0,
+                        0.0,
+                    ),
                 ),
             ]),
         );
@@ -652,11 +688,23 @@ mod test_sqlite {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".to_string(), "country".to_string(), 0.0, 0.0),
+                    CityInformation::new(
+                        "city-A".to_string(),
+                        "country".to_string(),
+                        Some("municipality".to_string()),
+                        0.0,
+                        0.0,
+                    ),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".to_string(), "country".to_string(), 0.0, 0.0),
+                    CityInformation::new(
+                        "city-B".to_string(),
+                        "country".to_string(),
+                        Some("municipality".to_string()),
+                        0.0,
+                        0.0,
+                    ),
                 ),
             ]),
         );
@@ -685,6 +733,7 @@ mod test_sqlite {
                     CityInformation::new(
                         "same-city".to_string(),
                         "same-country".to_string(),
+                        Some("same-municipality".to_string()),
                         0.0,
                         0.0,
                     ),
@@ -694,6 +743,7 @@ mod test_sqlite {
                     CityInformation::new(
                         "same-city".to_string(),
                         "same-country".to_string(),
+                        Some("same-municipality".to_string()),
                         0.0,
                         0.0,
                     ),
@@ -722,11 +772,23 @@ mod test_sqlite {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".to_string(), "country".to_string(), 0.0, 0.0),
+                    CityInformation::new(
+                        "city-A".to_string(),
+                        "country".to_string(),
+                        Some("municipality".to_string()),
+                        0.0,
+                        0.0,
+                    ),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".to_string(), "country".to_string(), 0.0, 0.0),
+                    CityInformation::new(
+                        "city-B".to_string(),
+                        "country".to_string(),
+                        Some("municipality".to_string()),
+                        0.0,
+                        0.0,
+                    ),
                 ),
             ]),
         );
@@ -755,7 +817,13 @@ mod test_sqlite {
             "source",
             HashMap::from([(
                 ImportedStationId::from("A".to_string()),
-                CityInformation::new("Paris".to_string(), "France".to_string(), 48.8566, 2.3522),
+                CityInformation::new(
+                    "Paris".to_string(),
+                    "France".to_string(),
+                    Some("Grand-Paris".to_string()),
+                    48.8566,
+                    2.3522,
+                ),
             )]),
         );
 
@@ -791,19 +859,27 @@ mod test_sqlite {
                     CityInformation::new(
                         "Paris".to_string(),
                         "France".to_string(),
+                        Some("Grand-Paris".to_string()),
                         48.8566,
                         2.3522,
                     ),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("London".to_string(), "UK".to_string(), 51.5074, -0.1278),
+                    CityInformation::new(
+                        "London".to_string(),
+                        "UK".to_string(),
+                        Some("Londond".to_string()),
+                        51.5074,
+                        -0.1278,
+                    ),
                 ),
                 (
                     ImportedStationId::from("C".to_string()),
                     CityInformation::new(
                         "Berlin".to_string(),
                         "Germany".to_string(),
+                        Some("Berlin".to_string()),
                         52.5200,
                         13.4050,
                     ),
@@ -853,13 +929,20 @@ mod test_sqlite {
                     CityInformation::new(
                         "Paris".to_string(),
                         "France".to_string(),
+                        Some("Grand-Paris".to_string()),
                         48.8566,
                         2.3522,
                     ),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("London".to_string(), "UK".to_string(), 51.5074, -0.1278),
+                    CityInformation::new(
+                        "London".to_string(),
+                        "UK".to_string(),
+                        Some("London".to_string()),
+                        51.5074,
+                        -0.1278,
+                    ),
                 ),
             ]),
         );

@@ -18,6 +18,7 @@ use crate::{
 pub struct CityInformation {
     name: String,
     country: String,
+    municipality: Option<String>,
     lat: f64,
     lon: f64,
 }
@@ -29,6 +30,10 @@ impl CityInformation {
 
     pub fn country(&self) -> &str {
         &self.country
+    }
+
+    pub fn municipality(&self) -> &Option<String> {
+        &self.municipality
     }
 
     pub fn lat(&self) -> f64 {
