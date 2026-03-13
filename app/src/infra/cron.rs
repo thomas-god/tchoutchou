@@ -57,90 +57,36 @@ impl CronServiceBuilder {
             jobs: Vec::new(),
             state_path: self.state_path,
         };
-        let allowed_types = vec![GTFSRouteType::Rail];
 
-        // SNCF import
+        // GTFS imports
         let svc = schedule_service.clone();
-        let types = allowed_types.clone();
-        service.register("sncf", Duration::ZERO, move || {
-            let mut svc = svc.clone();
-            let types = types.clone();
-            async move {
-                let archive = GTFSFetcher::fetch(
-                    "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip",
-                )
-                .await
-                .map_err(|e| anyhow::anyhow!("fetch sncf: {e}"))?;
-
-                let parser = GTFSParser::parse(archive.path().to_str().unwrap())
-                    .map_err(|e| anyhow::anyhow!("parse sncf: {e}"))?;
-
-                let importer = GTFSImporter::from_parser(&parser, "sncf", &types);
-
-                svc.ingest(importer.as_data()).await
-                    .map_err(|_| anyhow::anyhow!("ingest sncf failed"))?;
-
-                Ok(())
-            }
-        });
-
-        // DB (Deutsche Bahn) import
-        let svc = schedule_service.clone();
-        let types = allowed_types.clone();
-        service.register("db", Duration::ZERO, move || {
-            let mut svc = svc.clone();
-            let types = types.clone();
-            async move {
-                let archive =
-                    GTFSFetcher::fetch("https://download.gtfs.de/germany/fv_free/latest.zip")
-                        .await
-                        .map_err(|e| anyhow::anyhow!("fetch db: {e}"))?;
-
-                let parser = GTFSParser::parse(archive.path().to_str().unwrap())
-                    .map_err(|e| anyhow::anyhow!("parse db: {e}"))?;
-
-                let importer = GTFSImporter::from_parser(&parser, "db", &types);
-
-                svc.ingest(importer.as_data())
-                    .await
-                    .map_err(|_| anyhow::anyhow!("ingest db failed"))?;
-
-                Ok(())
-            }
-        });
-
-        // Renfe import
-        let svc = schedule_service.clone();
-        let types = allowed_types.clone();
-        service.register("renfe", Duration::ZERO, move || {
-            let mut svc = svc.clone();
-            let types = types.clone();
-            async move {
-                let archive = GTFSFetcher::fetch(
-                    "https://ssl.renfe.com/gtransit/Fichero_AV_LD/google_transit.zip",
-                )
-                .await
-                .map_err(|e| anyhow::anyhow!("fetch renfe: {e}"))?;
-
-                let parser = GTFSParser::parse(archive.path().to_str().unwrap())
-                    .map_err(|e| anyhow::anyhow!("parse renfe: {e}"))?;
-
-                let importer = GTFSImporter::from_parser(&parser, "renfe", &types);
-
-                svc.ingest(importer.as_data())
-                    .await
-                    .map_err(|_| anyhow::anyhow!("ingest renfe failed"))?;
-
-                Ok(())
-            }
-        });
-
-        // Explicitely warm graph cache for today
-        let svc = schedule_service;
-        service.register("warm-cache", Duration::from_mins(5), move || {
+        service.register("gtfs-imports", Duration::ZERO, move || {
             let svc = svc.clone();
             async move {
-                let _ = svc.warm(&format!("{}", Utc::now().format("%Y%m%d")));
+                let providers = [
+                    (
+                        "sncf",
+                        "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip"
+                    ),
+                    ("db", "https://download.gtfs.de/germany/fv_free/latest.zip"),
+                    (
+                        "renfe",
+                        "https://ssl.renfe.com/gtransit/Fichero_AV_LD/google_transit.zip",
+                    ),
+                ];
+
+                // Import data sequentially
+                for (provider, url) in providers.iter() {
+                    match import_gtfs(svc.clone(), url, provider).await {
+                        Ok(()) => tracing::info!("{provider} GTFS data imported"),
+                        Err(err) => {
+                            tracing::warn!("Error when importing {provider} GTFS data: {err}")
+                        }
+                    }
+                }
+
+                // Warm cache
+                svc.warm(&format!("{}", Utc::now().format("%Y%m%d")));
 
                 Ok(())
             }
@@ -148,6 +94,32 @@ impl CronServiceBuilder {
 
         service
     }
+}
+
+async fn import_gtfs(
+    mut schedule_service: ScheduleService<
+        SqliteRepository,
+        InMemoryGraphCache,
+        NominatimGeospatialRepository,
+    >,
+    url: &str,
+    provider: &str,
+) -> anyhow::Result<()> {
+    let archive = GTFSFetcher::fetch(url)
+        .await
+        .map_err(|e| anyhow::anyhow!("fetch {provider}: {e}"))?;
+
+    let parser = GTFSParser::parse(archive.path().to_str().unwrap())
+        .map_err(|e| anyhow::anyhow!("parse {provider}: {e}"))?;
+
+    let importer = GTFSImporter::from_parser(&parser, provider, &[GTFSRouteType::Rail]);
+
+    schedule_service
+        .ingest(importer.as_data())
+        .await
+        .map_err(|_| anyhow::anyhow!("ingest {provider} failed"))?;
+
+    Ok(())
 }
 
 // ── CronService ────────────────────────────────────────────────────────────────────────────────
