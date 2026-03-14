@@ -82,7 +82,7 @@ impl SqliteRepository {
                 name    TEXT NOT NULL,
                 lat     REAL NOT NULL,
                 lon     REAL NOT NULL,
-                UNIQUE (country, name)
+                UNIQUE (country, name, lat, lon)
             );
 
             CREATE TABLE IF NOT EXISTS t_stations (
@@ -295,7 +295,7 @@ impl SqliteRepository {
             .prepare_cached(
                 "INSERT INTO t_cities (country, name, lat, lon)
                 VALUES (?1, ?2, ?3, ?4)
-                ON CONFLICT (country, name) DO UPDATE SET lat = excluded.lat, lon = excluded.lon
+                ON CONFLICT (country, name, lat, lon) DO UPDATE SET name = excluded.name
                 RETURNING id;",
             )
             .expect("insert_cities: prepare failed");
@@ -870,5 +870,60 @@ mod test_sqlite {
         for i in 1..cities.len() {
             assert!(cities[i - 1].id().as_i64() <= cities[i].id().as_i64());
         }
+    }
+
+    #[test]
+    fn test_same_city_name_and_country_different_coordinates_creates_two_rows() {
+        let mut repo = make_repo();
+        let data = data_to_import(
+            vec![station("A"), station("B")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([
+                (
+                    ImportedStationId::from("A".to_string()),
+                    CityInformation::new("Paris".into(), "France".into(), 48.8566, 2.3522),
+                ),
+                (
+                    ImportedStationId::from("B".to_string()),
+                    CityInformation::new("Paris".into(), "France".into(), 48.9000, 2.4000),
+                ),
+            ]),
+        );
+
+        repo.import_timetable(data);
+
+        let cities = repo.all_cities();
+        assert_eq!(
+            cities.len(),
+            2,
+            "Should create two separate city rows for same name/country with different coordinates"
+        );
+
+        // Verify both cities have the same name and country but different coordinates
+        assert_eq!(cities[0].name(), "Paris");
+        assert_eq!(cities[0].country(), "France");
+        assert_eq!(cities[1].name(), "Paris");
+        assert_eq!(cities[1].country(), "France");
+
+        // Verify coordinates are different
+        assert_ne!(
+            (cities[0].lat(), cities[0].lon()),
+            (cities[1].lat(), cities[1].lon()),
+            "The two Paris cities should have different coordinates"
+        );
+
+        // Verify they have different IDs
+        assert_ne!(cities[0].id(), cities[1].id());
+
+        // Verify both stations map to different cities
+        let mapping = repo.stations_to_city();
+        assert_eq!(mapping.len(), 2);
+        assert_ne!(
+            mapping.get(&InternalStationId::from(1)),
+            mapping.get(&InternalStationId::from(2)),
+            "Different coordinates should result in different city IDs"
+        );
     }
 }
