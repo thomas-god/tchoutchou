@@ -9,8 +9,8 @@ use serde::Deserialize;
 use crate::app::{
     ImportedStation,
     schedule::{
-        CityInformation, FailureReason, GeospatialMappingFailure, GeospatialMappingResult,
-        GeospatialRepository,
+        CityInformation, CityName, FailureReason, GeospatialMappingFailure,
+        GeospatialMappingResult, GeospatialRepository,
     },
 };
 
@@ -66,15 +66,21 @@ impl NominatimGeospatialRepository {
     fn lookup_cache(&self, lat: f64, lon: f64) -> Option<CityInformation> {
         let conn = self.cache.lock().ok()?;
         conn.query_row(
-            "SELECT city, country, municipality, city_lat, city_lon FROM geocode_cache WHERE lat = ?1 AND lon = ?2",
+            "SELECT city, country, city_lat, city_lon
+                FROM geocode_cache
+                WHERE lat = ?1 AND lon = ?2",
             rusqlite::params![lat, lon],
             |row| {
                 let city: String = row.get(0)?;
                 let country: String = row.get(1)?;
-                let municipality: Option<String> = row.get(2)?;
-                let city_lat: f64 = row.get(3)?;
-                let city_lon: f64 = row.get(4)?;
-                Ok(CityInformation::new(city, country, municipality, city_lat, city_lon))
+                let city_lat: f64 = row.get(2)?;
+                let city_lon: f64 = row.get(3)?;
+                Ok(CityInformation::new(
+                    city.into(),
+                    country.into(),
+                    city_lat,
+                    city_lon,
+                ))
             },
         )
         .ok()
@@ -83,8 +89,17 @@ impl NominatimGeospatialRepository {
     fn store_cache(&self, lat: f64, lon: f64, info: &CityInformation) {
         if let Ok(conn) = self.cache.lock() {
             let _ = conn.execute(
-                "INSERT OR IGNORE INTO geocode_cache (lat, lon, city, country, municipality, city_lat, city_lon) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![lat, lon, info.name(), info.country(), info.municipality(), info.lat(), info.lon()],
+                "INSERT OR IGNORE INTO geocode_cache
+                    (lat, lon, city, country, city_lat, city_lon)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    lat,
+                    lon,
+                    info.name(),
+                    info.country(),
+                    info.lat(),
+                    info.lon(),
+                ],
             );
         }
     }
@@ -134,21 +149,22 @@ impl NominatimGeospatialRepository {
             .map_err(|_| FailureReason::InvalidCoordinates)?;
         let addr = nominatim.address;
         let city_name = extract_city_name(&addr).ok_or(FailureReason::MissingCityData)?;
-        let country = addr.country.ok_or(FailureReason::MissingCityData)?;
+        let country = addr.country.ok_or(FailureReason::MissingCityData)?.into();
 
-        let info = CityInformation::new(city_name, country, addr.municipality, city_lat, city_lon);
+        let info = CityInformation::new(city_name, country, city_lat, city_lon);
         self.store_cache(lat, lon, &info);
         Ok(info)
     }
 }
 
-fn extract_city_name(addr: &NominatimAddress) -> Option<String> {
+fn extract_city_name(addr: &NominatimAddress) -> Option<CityName> {
     addr.city
         .clone()
         .or_else(|| addr.town.clone())
         .or_else(|| addr.village.clone())
         .or_else(|| addr.hamlet.clone())
         .or_else(|| addr.municipality.clone())
+        .map(CityName::from)
 }
 
 impl GeospatialRepository for NominatimGeospatialRepository {
@@ -222,31 +238,31 @@ mod tests {
             Some("h"),
             Some("m"),
         );
-        assert_eq!(extract_city_name(&a).as_deref(), Some("Paris"));
+        assert_eq!(extract_city_name(&a), Some("Paris".into()));
     }
 
     #[test]
     fn town_used_when_no_city() {
         let a = addr(None, Some("Mâcon"), None, None, None);
-        assert_eq!(extract_city_name(&a).as_deref(), Some("Mâcon"));
+        assert_eq!(extract_city_name(&a), Some("Mâcon".into()));
     }
 
     #[test]
     fn village_used_when_no_city_or_town() {
         let a = addr(None, None, Some("Loché"), None, None);
-        assert_eq!(extract_city_name(&a).as_deref(), Some("Loché"));
+        assert_eq!(extract_city_name(&a), Some("Loché".into()));
     }
 
     #[test]
     fn hamlet_used_when_no_city_town_or_village() {
         let a = addr(None, None, None, Some("Petit Hamlet"), None);
-        assert_eq!(extract_city_name(&a).as_deref(), Some("Petit Hamlet"));
+        assert_eq!(extract_city_name(&a), Some("Petit Hamlet".into()));
     }
 
     #[test]
     fn municipality_used_when_all_higher_priority_absent() {
         let a = addr(None, None, None, None, Some("Test Municipality"));
-        assert_eq!(extract_city_name(&a).as_deref(), Some("Test Municipality"));
+        assert_eq!(extract_city_name(&a), Some("Test Municipality".into()));
     }
 
     #[test]
@@ -278,8 +294,8 @@ mod tests {
         let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
         let result = repo.reverse_geocode(45.75, 4.85).await.unwrap();
 
-        assert_eq!(result.name(), "Lyon");
-        assert_eq!(result.country(), "France");
+        assert_eq!(result.name(), &"Lyon".into());
+        assert_eq!(result.country(), &"France".into());
         assert_eq!(result.lat(), 45.75);
         assert_eq!(result.lon(), 4.85);
         mock.assert();

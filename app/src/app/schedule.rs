@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use derive_more::{Constructor, From};
+use derive_more::{AsRef, Constructor, From, FromStr};
 
 use crate::{
     app::{
@@ -14,26 +14,31 @@ use crate::{
     domain::optim::{City, CityId, DestinationFilters, Graph, Trip, TripLeg, find_trips},
 };
 
+#[derive(Debug, Clone, From, FromStr, Constructor, PartialEq, PartialOrd, AsRef)]
+#[from(&str, String)]
+#[as_ref(str, String)]
+pub struct CityName(String);
+
+#[derive(Debug, Clone, From, FromStr, Constructor, PartialEq, PartialOrd, AsRef)]
+#[from(&str, String)]
+#[as_ref(str, String)]
+pub struct CityCountry(String);
+
 #[derive(Debug, Clone, Constructor, PartialEq, PartialOrd)]
 pub struct CityInformation {
-    name: String,
-    country: String,
-    municipality: Option<String>,
+    name: CityName,
+    country: CityCountry,
     lat: f64,
     lon: f64,
 }
 
 impl CityInformation {
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &CityName {
         &self.name
     }
 
-    pub fn country(&self) -> &str {
+    pub fn country(&self) -> &CityCountry {
         &self.country
-    }
-
-    pub fn municipality(&self) -> &Option<String> {
-        &self.municipality
     }
 
     pub fn lat(&self) -> f64 {
