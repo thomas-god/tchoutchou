@@ -6,7 +6,6 @@
 	import DestinationsMap from '../organisms/DestinationsMap.svelte';
 
 	let stop: { id: number; name: string } | undefined = $state(undefined);
-	let maxConnections: number = $state(0);
 
 	// Station autocomplete state
 	let query = $state('');
@@ -33,7 +32,6 @@
 
 	$effect(() => {
 		const currentStop = stop;
-		const currentMaxConnections = maxConnections;
 
 		if (currentStop === undefined) {
 			result = undefined;
@@ -46,7 +44,7 @@
 		selectedDestination = undefined;
 		let cancelled = false;
 
-		fetchDestinations({ from: currentStop.id, maxConnections: currentMaxConnections }).then((r) => {
+		fetchDestinations({ from: currentStop.id, maxConnections: 2 }).then((r) => {
 			if (!cancelled) {
 				result = r;
 				loading = false;
@@ -121,20 +119,6 @@
 						{/each}
 					</ul>
 				{/if}
-			</div>
-
-			<!-- Max connections -->
-			<div class="mt-3 flex flex-col items-start gap-2">
-				<span class="text-sm font-semibold">Nombre de correspondances</span>
-				<div class="join">
-					{#each [0, 1, 2] as n (n)}
-						<button
-							class="btn join-item btn-sm"
-							class:btn-primary={maxConnections === n}
-							onclick={() => (maxConnections = n)}>{n}</button
-						>
-					{/each}
-				</div>
 			</div>
 		</div>
 
