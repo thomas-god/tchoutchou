@@ -114,7 +114,7 @@
 
 	$effect(() => {
 		if (map === undefined) {
-			map = leaflet.map(mapElement);
+			map = leaflet.map(mapElement, { zoomControl: false });
 			leaflet
 				.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 					attribution:

@@ -90,36 +90,35 @@
 		class="absolute top-4 right-4 left-4 z-1000 flex flex-col gap-3 sm:right-auto sm:max-h-[calc(100lvh-2rem)] sm:w-80"
 	>
 		<!-- Form controls panel -->
-		<div class="rounded-lg bg-base-300 p-3 shadow-lg">
-			<div class="flex flex-col">
-				<label class="flex flex-col gap-2">
-					<span class="text-sm font-semibold">Gare de départ</span>
-					<input
-						type="text"
-						bind:value={query}
-						oninput={debounce}
-						class="input w-full pl-2 text-base-content input-info"
-					/>
-				</label>
-				{#if stop === undefined && autocompleteOptions.length > 0}
-					<ul class="flex flex-col items-start rounded-b-lg bg-base-100 p-2">
-						{#each autocompleteOptions as option (option.id)}
-							<li class="w-full p-0.5 hover:bg-base-300">
-								<button
-									class="w-full text-start"
-									onclick={() => {
-										stop = option;
-										query = option.name;
-										autocompleteOptions = [];
-									}}
-								>
-									{option.name}
-								</button>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</div>
+		<div class="flex flex-col pt-1">
+			<label class="input input-md w-full rounded-lg">
+				<img src="/icons/locomotive.svg" alt="Steam train locomotive" class="h-4 w-4" />
+				<input
+					type="search"
+					bind:value={query}
+					oninput={debounce}
+					placeholder="Je souhaite partir de ..."
+					class="grow"
+				/>
+			</label>
+			{#if stop === undefined && autocompleteOptions.length > 0}
+				<ul class="flex flex-col items-start rounded-b-lg bg-base-100 p-2">
+					{#each autocompleteOptions as option (option.id)}
+						<li class="w-full p-0.5 hover:bg-base-300">
+							<button
+								class="w-full text-start"
+								onclick={() => {
+									stop = option;
+									query = option.name;
+									autocompleteOptions = [];
+								}}
+							>
+								{option.name}
+							</button>
+						</li>
+					{/each}
+				</ul>
+			{/if}
 		</div>
 
 		<!-- Results panel (desktop only) -->
