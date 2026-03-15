@@ -101,7 +101,7 @@
 	/>
 
 	<div
-		class="absolute top-4 right-4 left-4 z-1000 flex flex-col gap-3 sm:right-auto sm:max-h-[calc(100lvh-2rem)] sm:w-80"
+		class="absolute top-4 right-4 left-4 z-1000 flex max-h-[calc(100lvh-2rem)] flex-col gap-3 overflow-y-auto sm:right-auto sm:w-80"
 	>
 		<!-- Form controls panel -->
 		<div class="flex flex-col pt-1">
@@ -140,10 +140,23 @@
 				</ul>
 			{/if}
 		</div>
+
+		{#if selectedDestination}
+			<div class="hidden sm:block" transition:fade={{ duration: 150 }}>
+				<DestinationCard
+					destination={selectedDestination}
+					originName={result?.origin?.name}
+					onClose={() => (selectedDestination = undefined)}
+				/>
+			</div>
+		{/if}
 	</div>
 
 	{#if selectedDestination}
-		<div class="absolute right-0 bottom-0 left-0 z-1000" transition:fade={{ duration: 150 }}>
+		<div
+			class="absolute right-0 bottom-0 left-0 z-1000 sm:hidden"
+			transition:fade={{ duration: 150 }}
+		>
 			<DestinationCard
 				destination={selectedDestination}
 				originName={result?.origin?.name}

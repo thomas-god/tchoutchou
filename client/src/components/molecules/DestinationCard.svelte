@@ -59,12 +59,13 @@
 		<p class="text-sm text-base-content/80 italic">{description}</p>
 
 		<!-- Travel time chip -->
-		<div class="flex">
-			<span class="badge gap-1.5 px-3 py-3 text-sm font-medium badge-primary">
-				<img src="/icons/locomotive.svg" alt="" class="h-3.5 w-3.5 invert" />
-				{displayDuration(destination.duration)} depuis {originName ?? 'votre ville'}
-				({connectionLabel})
-			</span>
+		<div
+			class="flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-sm font-medium text-primary-content"
+		>
+			<img src="/icons/locomotive.svg" alt="" class="h-3.5 w-3.5 shrink-0 invert" />
+			<span
+				>{displayDuration(destination.duration)} depuis {originName ?? 'votre ville'} ({connectionLabel})</span
+			>
 		</div>
 
 		<!-- Weather & best period -->
