@@ -114,11 +114,7 @@
 					placeholder="Je souhaite partir de ..."
 					class="grow"
 				/>
-				<button
-					class="btn btn-circle btn-ghost"
-					onclick={() => filtersDialog.showModal()}
-					disabled={result === undefined || result.destinations.length === 0}
-				>
+				<button class="btn btn-circle btn-ghost" onclick={() => filtersDialog.showModal()}>
 					<img src="/icons/filter.svg" alt="Filter icon" class="h-4 w-4" />
 				</button>
 			</label>
@@ -161,7 +157,7 @@
 				</div>
 			{:else}
 				<div class="hidden rounded-lg bg-base-300 p-3 shadow-lg sm:block">
-					<p class="text-warning">Gare de départ introuvable dans la base de données.</p>
+					<p class="text-warning">Ville de départ introuvable dans la base de données.</p>
 				</div>
 			{/if}
 		{/if}
