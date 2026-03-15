@@ -5,9 +5,10 @@
 	interface Props {
 		destination: DestinationResult;
 		originName?: string;
+		onClose?: () => void;
 	}
 
-	let { destination, originName }: Props = $props();
+	let { destination, originName, onClose }: Props = $props();
 
 	// Placeholder values until added to DestinationResult
 	const description = 'Une destination incontournable aux mille et une facettes.';
@@ -29,7 +30,14 @@
 	);
 </script>
 
-<div class="card overflow-hidden bg-base-100 shadow-sm">
+<div class="card relative overflow-hidden bg-base-100 shadow-sm">
+	{#if onClose}
+		<button
+			class="btn absolute top-2 right-2 z-10 btn-circle bg-base-100/80 backdrop-blur-sm btn-sm"
+			aria-label="Fermer"
+			onclick={onClose}>✕</button
+		>
+	{/if}
 	<!-- Photos -->
 	<div class="grid h-32 grid-cols-2 gap-0.5">
 		{#each photos as src, i (i)}

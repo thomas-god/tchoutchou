@@ -144,7 +144,11 @@
 
 	{#if selectedDestination}
 		<div class="absolute right-0 bottom-0 left-0 z-1000" transition:fade={{ duration: 150 }}>
-			<DestinationCard destination={selectedDestination} originName={result?.origin?.name} />
+			<DestinationCard
+				destination={selectedDestination}
+				originName={result?.origin?.name}
+				onClose={() => (selectedDestination = undefined)}
+			/>
 		</div>
 	{/if}
 
