@@ -1,8 +1,5 @@
 <script lang="ts">
-	export interface Range {
-		min: number;
-		max: number;
-	}
+	import type { Range } from '$lib';
 
 	let {
 		range,

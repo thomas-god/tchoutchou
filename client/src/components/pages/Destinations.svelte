@@ -1,9 +1,10 @@
 <script lang="ts">
-	import { displayDuration } from '$lib';
+	import { displayDuration, filterAndSortDestinations, type DestinationFilters } from '$lib';
 	import { fade } from 'svelte/transition';
 	import { autocompleteStation, fetchDestinations } from '$lib/remote/destinations.remote';
 	import type { DestinationResult, City } from '$lib/remote/destinations.remote';
 	import DestinationsMap from '../organisms/DestinationsMap.svelte';
+	import DestinationsFilters from '../organisms/DestinationsFilters.svelte';
 
 	let stop: { id: number; name: string } | undefined = $state(undefined);
 
@@ -17,6 +18,13 @@
 	let loading = $state(false);
 	let selectedDestination: DestinationResult | undefined = $state(undefined);
 	let showResults = $state(false);
+	let filtersDialog: HTMLDialogElement;
+
+	// Filter state
+	let filters: DestinationFilters = $state({
+		duration: { min: 0, max: 24 * 3600 },
+		maxConnections: 2
+	});
 
 	const debounce = () => {
 		stop = undefined;
@@ -57,7 +65,7 @@
 	});
 
 	let bounds = $derived.by(() => {
-		const destinations = result?.destinations ?? [];
+		const destinations = sortedDestinations;
 		if (destinations.length === 0) return undefined;
 		return {
 			lat: {
@@ -71,15 +79,15 @@
 		};
 	});
 
-	let sortedDestinations = $derived.by(() =>
-		[...(result?.destinations ?? [])].sort((a, b) => a.duration - b.duration)
-	);
+	let sortedDestinations = $derived.by(() => {
+		return filterAndSortDestinations(result?.destinations ?? [], filters);
+	});
 </script>
 
 <div class="relative h-lvh w-full">
 	<DestinationsMap
 		origin={result?.origin ?? undefined}
-		destinations={result?.destinations ?? []}
+		destinations={sortedDestinations}
 		{selectedDestination}
 		{bounds}
 		onDestinationSelect={(destination) => (selectedDestination = destination)}
@@ -100,6 +108,13 @@
 					placeholder="Je souhaite partir de ..."
 					class="grow"
 				/>
+				<button
+					class="btn btn-circle btn-ghost"
+					onclick={() => filtersDialog.showModal()}
+					disabled={result === undefined || result.destinations.length === 0}
+				>
+					<img src="/icons/filter.svg" alt="Filter icon" class="h-4 w-4" />
+				</button>
 			</label>
 			{#if stop === undefined && autocompleteOptions.length > 0}
 				<ul class="flex flex-col items-start rounded-b-lg bg-base-100 p-2">
@@ -132,7 +147,7 @@
 					class="hidden min-h-0 flex-col gap-1 overflow-hidden rounded-lg bg-base-300 p-3 shadow-lg sm:flex"
 				>
 					<h2 class="shrink-0 text-sm font-semibold">
-						{result.destinations.length} destinations trouvées
+						{sortedDestinations.length} destinations trouvées
 					</h2>
 					<div class="overflow-y-auto">
 						{@render destinationItems()}
@@ -154,7 +169,7 @@
 					<span class="loading loading-sm loading-spinner"></span>
 					Recherche en cours…
 				{:else}
-					{result!.destinations.length} destinations ➡️
+					{sortedDestinations.length} destinations ➡️
 				{/if}
 			</button>
 		</div>
@@ -167,7 +182,7 @@
 		>
 			<div class="flex shrink-0 items-center justify-between border-b border-base-200 p-3">
 				<h2 class="text-sm font-semibold">
-					{result!.destinations.length} destinations trouvées
+					{sortedDestinations.length} destinations trouvées
 				</h2>
 				<button class="btn btn-circle btn-ghost btn-sm" onclick={() => (showResults = false)}
 					>✕</button
@@ -178,6 +193,20 @@
 			</div>
 		</div>
 	{/if}
+
+	<!-- Filters Modal -->
+	<dialog bind:this={filtersDialog} class="modal">
+		<div class="modal-box">
+			<form method="dialog">
+				<button class="btn absolute top-2 right-2 btn-circle btn-ghost btn-sm">✕</button>
+			</form>
+			<h2 class="mb-4 text-xl font-bold">Filtres</h2>
+			<DestinationsFilters bind:filters okCallback={() => filtersDialog.close()} />
+		</div>
+		<form method="dialog" class="modal-backdrop">
+			<button>close</button>
+		</form>
+	</dialog>
 </div>
 
 {#snippet destinationItems()}

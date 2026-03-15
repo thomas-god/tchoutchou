@@ -9,3 +9,6 @@ export const displayDuration = (seconds: number): string => {
 		return `${minutes}m`;
 	}
 };
+
+// Re-export filters module
+export * from './filters';
