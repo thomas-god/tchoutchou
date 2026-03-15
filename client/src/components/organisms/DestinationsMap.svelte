@@ -29,12 +29,6 @@
 		destinations.map((destination) => {
 			const marker = leaflet
 				.circleMarker([destination.station.lat, destination.station.lon])
-				.bindPopup(
-					`${destination.station.name} (${displayDuration(destination.duration)}, ${destination.connections} correspondance(s))` +
-						(destination.visitedStations.length > 0
-							? `<br>Via\u00a0: ${destination.visitedStations.map((s) => s.name).join(' \u2192 ')}`
-							: '')
-				)
 				.on('click', () => {
 					if (onDestinationSelect) {
 						onDestinationSelect(destination);

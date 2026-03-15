@@ -5,6 +5,7 @@
 	import type { DestinationResult, City } from '$lib/remote/destinations.remote';
 	import DestinationsMap from '../organisms/DestinationsMap.svelte';
 	import DestinationsFilters from '../organisms/DestinationsFilters.svelte';
+	import DestinationCard from '../molecules/DestinationCard.svelte';
 
 	let stop: { id: number; name: string } | undefined = $state(undefined);
 
@@ -99,7 +100,6 @@
 		onDestinationSelect={(destination) => (selectedDestination = destination)}
 	/>
 
-	<!-- Sidebar: form always visible; results visible only on desktop (sm+) -->
 	<div
 		class="absolute top-4 right-4 left-4 z-1000 flex flex-col gap-3 sm:right-auto sm:max-h-[calc(100lvh-2rem)] sm:w-80"
 	>
@@ -141,6 +141,12 @@
 			{/if}
 		</div>
 	</div>
+
+	{#if selectedDestination}
+		<div class="absolute right-0 bottom-0 left-0 z-1000" transition:fade={{ duration: 150 }}>
+			<DestinationCard destination={selectedDestination} originName={result?.origin?.name} />
+		</div>
+	{/if}
 
 	<!-- Filters Modal -->
 	<dialog bind:this={filtersDialog} class="modal">
