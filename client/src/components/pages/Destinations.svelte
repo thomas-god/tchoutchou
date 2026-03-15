@@ -114,6 +114,9 @@
 					placeholder="Je souhaite partir de ..."
 					class="grow"
 				/>
+				{#if loading}
+					<span class="loading loading-xl self-center loading-dots"></span>
+				{/if}
 				<button class="btn btn-circle btn-ghost" onclick={() => filtersDialog.showModal()}>
 					<img src="/icons/filter.svg" alt="Filter icon" class="h-4 w-4" />
 				</button>
@@ -137,64 +140,7 @@
 				</ul>
 			{/if}
 		</div>
-
-		<!-- Results panel (desktop only) -->
-		{#if loading}
-			<div class="hidden rounded-lg bg-base-300 p-3 shadow-lg sm:block">
-				<span class="loading loading-xl self-center loading-dots"></span>
-			</div>
-		{:else if result !== undefined}
-			{#if result.origin !== null}
-				<div
-					class="hidden min-h-0 flex-col gap-1 overflow-hidden rounded-lg bg-base-300 p-3 shadow-lg sm:flex"
-				>
-					<h2 class="shrink-0 text-sm font-semibold">
-						{sortedDestinations.length} destinations trouvées
-					</h2>
-					<div class="overflow-y-auto">
-						{@render destinationItems()}
-					</div>
-				</div>
-			{:else}
-				<div class="hidden rounded-lg bg-base-300 p-3 shadow-lg sm:block">
-					<p class="text-warning">Ville de départ introuvable dans la base de données.</p>
-				</div>
-			{/if}
-		{/if}
 	</div>
-
-	<!-- Mobile: floating toggle button -->
-	{#if !showResults && (loading || (result !== undefined && result.origin !== null))}
-		<div class="absolute bottom-14 left-1/2 z-1000 -translate-x-1/2 sm:hidden">
-			<button class="btn shadow-lg btn-primary" onclick={() => (showResults = true)}>
-				{#if loading}
-					<span class="loading loading-sm loading-spinner"></span>
-					Recherche en cours…
-				{:else}
-					{sortedDestinations.length} destinations ➡️
-				{/if}
-			</button>
-		</div>
-	{/if}
-
-	<!-- Mobile: bottom sheet results -->
-	{#if showResults && result?.origin !== null}
-		<div
-			class="absolute inset-x-0 bottom-0 z-1000 flex max-h-[60lvh] flex-col rounded-t-xl bg-base-300 shadow-lg sm:hidden"
-		>
-			<div class="flex shrink-0 items-center justify-between border-b border-base-200 p-3">
-				<h2 class="text-sm font-semibold">
-					{sortedDestinations.length} destinations trouvées
-				</h2>
-				<button class="btn btn-circle btn-ghost btn-sm" onclick={() => (showResults = false)}
-					>✕</button
-				>
-			</div>
-			<div class="overflow-y-auto p-3">
-				{@render destinationItems()}
-			</div>
-		</div>
-	{/if}
 
 	<!-- Filters Modal -->
 	<dialog bind:this={filtersDialog} class="modal">
@@ -219,26 +165,3 @@
 		</form>
 	</dialog>
 </div>
-
-{#snippet destinationItems()}
-	{#each sortedDestinations as destination (destination.station.id)}
-		<div class="p-1 hover:bg-base-100" in:fade|global out:fade|global={{ duration: 50 }}>
-			<button onclick={() => (selectedDestination = destination)} class="w-full text-start">
-				<h3 class="text-md font-semibold">{destination.station.name}</h3>
-				<p class="text-xs italic">
-					{displayDuration(destination.duration)}
-					<span>
-						·
-						{#if destination.connections > 0}
-							{destination.connections} correspondance(s)
-						{:else}
-							direct
-						{/if}
-					</span>
-				</p>
-			</button>
-		</div>
-	{:else}
-		<p class="text-warning">Pas de destination trouvée pour cette gare</p>
-	{/each}
-{/snippet}
