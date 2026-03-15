@@ -55,6 +55,7 @@
 		fetchDestinations({ from: currentStop.id, maxConnections: 2 }).then((r) => {
 			if (!cancelled) {
 				result = r;
+				sortedDestinations = filterAndSortDestinations(result?.destinations ?? [], filters);
 				loading = false;
 			}
 		});
@@ -79,9 +80,14 @@
 		};
 	});
 
-	let sortedDestinations = $derived.by(() => {
-		return filterAndSortDestinations(result?.destinations ?? [], filters);
-	});
+	let sortedDestinations: DestinationResult[] = $state([]);
+	let debounceTimer: ReturnType<typeof setTimeout>;
+	const debouncedDestinationsFilters = () => {
+		clearTimeout(debounceTimer);
+		debounceTimer = setTimeout(() => {
+			sortedDestinations = filterAndSortDestinations(result?.destinations ?? [], filters);
+		}, 300);
+	};
 </script>
 
 <div class="relative h-lvh w-full">
@@ -201,7 +207,16 @@
 				<button class="btn absolute top-2 right-2 btn-circle btn-ghost btn-sm">✕</button>
 			</form>
 			<h2 class="mb-4 text-xl font-bold">Filtres</h2>
-			<DestinationsFilters bind:filters okCallback={() => filtersDialog.close()} />
+			<DestinationsFilters
+				bind:filters={
+					() => filters,
+					(v) => {
+						filters = v;
+						debouncedDestinationsFilters();
+					}
+				}
+				okCallback={() => filtersDialog.close()}
+			/>
 		</div>
 		<form method="dialog" class="modal-backdrop">
 			<button>close</button>
