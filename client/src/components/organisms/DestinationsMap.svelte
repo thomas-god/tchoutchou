@@ -20,7 +20,11 @@
 	let mapElement: HTMLDivElement;
 	let map: any = $state(undefined);
 
-	let markersLayer = (leaflet as any).markerClusterGroup({ chunkedLoading: true });
+	let markersLayer = (leaflet as any).markerClusterGroup({
+		chunkedLoading: true,
+		disableClusteringAtZoom: 10,
+		spiderfyOnMaxZoom: false
+	});
 	let highlightLayer = leaflet.layerGroup();
 	let routeLayer = leaflet.layerGroup();
 	let previouslyHighlighted: any = undefined;
@@ -63,11 +67,10 @@
 				highlightLayer.addLayer(entry.marker);
 				previouslyHighlighted = entry.marker;
 
-				map.flyTo([selectedDestination.station.lat, selectedDestination.station.lon], 8, {
+				map.flyTo([selectedDestination.station.lat, selectedDestination.station.lon], map.zoom, {
 					duration: 0.6,
 					animate: true
 				});
-				entry.marker.openPopup();
 
 				// Draw route lines from origin through intermediate stations to destination
 				if (origin !== undefined) {
