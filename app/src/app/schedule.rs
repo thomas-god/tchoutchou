@@ -137,13 +137,15 @@ pub trait ScheduleDataRepository {
     fn cities_by_ids(&self, ids: &[CityId]) -> Vec<City>;
 }
 
-/// A thread-safe cache mapping date strings (`YYYYMMDD`) to pre-built [`Graph`]s.
-///
-/// Implementations are responsible for their own interior mutability so that methods can be
-/// called with a shared `&self` reference. All clones must share the same underlying storage.
 pub trait GraphCache: Send + Sync {
     fn get(&self, date: &str) -> Option<Arc<Graph>>;
     fn insert(&self, date: &str, graph: Arc<Graph>);
+    fn clear(&self);
+}
+
+pub trait DestinationsCache: Send + Sync {
+    fn get(&self, date: &str, origin: &CityId) -> Option<Arc<(Vec<Trip>, Vec<City>)>>;
+    fn insert(&self, date: &str, origin: &CityId, result: Arc<(Vec<Trip>, Vec<City>)>);
     fn clear(&self);
 }
 
@@ -180,31 +182,39 @@ pub trait GeospatialRepository: Clone + Send + Sync + 'static {
 /// Application service that aggregates data from various importers, persists it through a
 /// [`TrainDataRepository`], and exposes a [`Graph`] ready for the optimisation algorithms in
 /// [`crate::domain::optim`].
-pub struct ScheduleService<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository> {
+pub struct ScheduleService<
+    R: ScheduleDataRepository,
+    GC: GraphCache,
+    DC: DestinationsCache,
+    GR: GeospatialRepository,
+> {
     repository: Arc<Mutex<R>>,
     geo: Arc<GR>,
     graph_cache: Arc<GC>,
+    destinations_cache: Arc<DC>,
 }
 
-impl<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository> Clone
-    for ScheduleService<R, GC, GR>
+impl<R: ScheduleDataRepository, GC: GraphCache, DC: DestinationsCache, GR: GeospatialRepository>
+    Clone for ScheduleService<R, GC, DC, GR>
 {
     fn clone(&self) -> Self {
         Self {
             repository: self.repository.clone(),
             geo: self.geo.clone(),
             graph_cache: self.graph_cache.clone(),
+            destinations_cache: self.destinations_cache.clone(),
         }
     }
 }
 
-impl<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository>
-    ScheduleService<R, GC, GR>
+impl<R: ScheduleDataRepository, GC: GraphCache, DC: DestinationsCache, GR: GeospatialRepository>
+    ScheduleService<R, GC, DC, GR>
 {
-    pub fn new(repository: R, cache: GC, geo: GR) -> Self {
+    pub fn new(repository: R, graph_cache: GC, destinations_cache: DC, geo: GR) -> Self {
         Self {
             repository: Arc::new(Mutex::new(repository)),
-            graph_cache: Arc::new(cache),
+            graph_cache: Arc::new(graph_cache),
+            destinations_cache: Arc::new(destinations_cache),
             geo: Arc::new(geo),
         }
     }
@@ -230,6 +240,7 @@ impl<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository>
             })
         })?;
         self.graph_cache.clear();
+        self.destinations_cache.clear();
         Ok(result)
     }
 
@@ -247,6 +258,11 @@ impl<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository>
         date: &str,
         origin: &CityId,
     ) -> Result<(Vec<Trip>, Vec<City>), ()> {
+        // Fast path: return a cached result.
+        if let Some(cached) = self.destinations_cache.get(date, origin) {
+            return Ok((*cached).clone());
+        }
+
         let graph = self.graph(date)?;
 
         let destinations = find_trips(origin, &graph, &DestinationFilters::default());
@@ -265,7 +281,10 @@ impl<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository>
             .map_err(|_| ())
             .map(|repo| repo.cities_by_ids(&city_ids))?;
 
-        Ok((destinations, cities))
+        let result = Arc::new((destinations, cities));
+        self.destinations_cache
+            .insert(date, origin, Arc::clone(&result));
+        Ok((*result).clone())
     }
 
     /// Build a [`Graph`] from trips active on `date` (format `YYYYMMDD`).
@@ -336,7 +355,7 @@ fn build_graph(legs: &[InternalTripLeg], mappings: &HashMap<InternalStationId, C
 pub mod test_utils {
     use mockall::mock;
 
-    use crate::infra::graph_cache::InMemoryGraphCache;
+    use crate::infra::caches::InMemoryGraphCache;
 
     use super::*;
 
@@ -374,11 +393,16 @@ pub mod test_utils {
     pub fn make_service(
         repo: MockScheduleDataRepository,
         geo: MockGeospatialRepository,
-    ) -> ScheduleService<MockScheduleDataRepository, InMemoryGraphCache, MockGeospatialRepository>
-    {
+    ) -> ScheduleService<
+        MockScheduleDataRepository,
+        InMemoryGraphCache,
+        crate::infra::caches::InMemoryDestinationsCache,
+        MockGeospatialRepository,
+    > {
         ScheduleService::new(
             repo,
-            crate::infra::graph_cache::InMemoryGraphCache::default(),
+            crate::infra::caches::InMemoryGraphCache::default(),
+            crate::infra::caches::InMemoryDestinationsCache::default(),
             geo,
         )
     }
@@ -678,5 +702,112 @@ mod tests {
         let service = make_service(mock, geo);
 
         let _ = service.find_destinations(TEST_DATE, &cid(1));
+    }
+
+    // ---- destinations cache ----
+
+    #[test]
+    fn find_destinations_hits_repository_only_once_for_same_origin_and_date() {
+        let trips = vec![InternalTripLeg::new(siid(1), siid(2), 100, 200)];
+        let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2))]);
+
+        let mut mock = MockScheduleDataRepository::new();
+        mock.expect_legs_for_date()
+            .withf(|d| d == TEST_DATE)
+            .times(1)
+            .return_const(trips);
+        mock.expect_stations_to_city()
+            .times(1)
+            .return_const(mappings);
+        // cities_by_ids must be called exactly once despite two find_destinations calls.
+        mock.expect_cities_by_ids().times(1).returning(|_| vec![]);
+
+        let geo = MockGeospatialRepository::new();
+        let service = make_service(mock, geo);
+
+        let (t1, c1) = service
+            .find_destinations(TEST_DATE, &cid(1))
+            .expect("first call");
+        let (t2, c2) = service
+            .find_destinations(TEST_DATE, &cid(1))
+            .expect("second call (cached)");
+
+        assert_eq!(t1.len(), t2.len());
+        assert_eq!(c1.len(), c2.len());
+    }
+
+    #[test]
+    fn find_destinations_caches_separately_per_origin() {
+        let trips = vec![
+            InternalTripLeg::new(siid(1), siid(3), 100, 200),
+            InternalTripLeg::new(siid(2), siid(3), 300, 400),
+        ];
+        let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2)), (siid(3), cid(3))]);
+
+        let mut mock = MockScheduleDataRepository::new();
+        mock.expect_legs_for_date()
+            .withf(|d| d == TEST_DATE)
+            .times(1)
+            .return_const(trips);
+        mock.expect_stations_to_city()
+            .times(1)
+            .return_const(mappings);
+        // Each distinct origin causes its own cache miss, so cities_by_ids is called twice.
+        mock.expect_cities_by_ids().times(2).returning(|_| vec![]);
+
+        let geo = MockGeospatialRepository::new();
+        let service = make_service(mock, geo);
+
+        let _ = service.find_destinations(TEST_DATE, &cid(1));
+        let _ = service.find_destinations(TEST_DATE, &cid(2));
+        // Third call reuses the cached result for origin 1 — no extra repository hit.
+        let _ = service.find_destinations(TEST_DATE, &cid(1));
+    }
+
+    #[tokio::test]
+    async fn ingest_invalidates_destinations_cache() {
+        let trips = vec![InternalTripLeg::new(siid(1), siid(2), 100, 200)];
+        let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2))]);
+        let city = City::new(cid(2), "London".to_string(), "UK".to_string(), 51.5, -0.1);
+
+        let mut mock = MockScheduleDataRepository::new();
+        mock.expect_import_timetable()
+            .times(1)
+            .returning(|_| empty_result());
+        mock.expect_legs_for_date()
+            .withf(|d| d == TEST_DATE)
+            .times(2)
+            .return_const(trips.clone());
+        mock.expect_stations_to_city()
+            .times(2)
+            .return_const(mappings);
+        // cities_by_ids must be called twice: once before ingest (cache miss) and once
+        // after ingest (cache invalidated, so another miss).
+        mock.expect_cities_by_ids()
+            .times(2)
+            .returning(move |_| vec![city.clone()]);
+
+        let mut geo = MockGeospatialRepository::new();
+        geo.expect_match_stations_to_cities()
+            .once()
+            .returning(|_| GeospatialMappingResult {
+                mapping: HashMap::new(),
+                failures: vec![],
+            });
+
+        let mut service = make_service(mock, geo);
+
+        let (_, cities_before) = service
+            .find_destinations(TEST_DATE, &cid(1))
+            .expect("before ingest");
+        assert_eq!(cities_before.len(), 1);
+
+        let _ = service.ingest(make_importer("source", &["A", "B"])).await;
+
+        // Cache was cleared — repository must be queried again.
+        let (_, cities_after) = service
+            .find_destinations(TEST_DATE, &cid(1))
+            .expect("after ingest");
+        assert_eq!(cities_after.len(), 1);
     }
 }

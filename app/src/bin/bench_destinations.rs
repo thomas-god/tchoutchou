@@ -4,7 +4,7 @@ use app::{
     app::schedule::ScheduleService,
     domain::optim::CityId,
     infra::{
-        graph_cache::InMemoryGraphCache,
+        caches::{InMemoryDestinationsCache, InMemoryGraphCache},
         repository::{geospatial::NominatimGeospatialRepository, sqlite::SqliteRepository},
     },
 };
@@ -110,6 +110,7 @@ fn main() -> anyhow::Result<()> {
     let schedule_service = ScheduleService::new(
         repo,
         InMemoryGraphCache::default(),
+        InMemoryDestinationsCache::default(),
         NominatimGeospatialRepository::new("", "").expect("failed to load geospatial repository"),
     );
 

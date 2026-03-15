@@ -15,8 +15,8 @@ pub mod handlers;
 use crate::{
     app::schedule::ScheduleService,
     infra::{
+        caches::{InMemoryDestinationsCache, InMemoryGraphCache},
         config::Config,
-        graph_cache::InMemoryGraphCache,
         http::handlers::{autocomplete_city, get_destinations},
         repository::{geospatial::NominatimGeospatialRepository, sqlite::SqliteRepository},
     },
@@ -24,7 +24,12 @@ use crate::{
 
 #[derive(Clone)]
 pub struct AppState {
-    schedule: ScheduleService<SqliteRepository, InMemoryGraphCache, NominatimGeospatialRepository>,
+    schedule: ScheduleService<
+        SqliteRepository,
+        InMemoryGraphCache,
+        InMemoryDestinationsCache,
+        NominatimGeospatialRepository,
+    >,
 }
 
 pub struct HttpServer {
@@ -38,6 +43,7 @@ impl HttpServer {
         schedule_service: ScheduleService<
             SqliteRepository,
             InMemoryGraphCache,
+            InMemoryDestinationsCache,
             NominatimGeospatialRepository,
         >,
     ) -> anyhow::Result<Self> {

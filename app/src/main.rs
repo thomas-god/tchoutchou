@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use app::{
     app::schedule::ScheduleService,
     infra::{
+        caches::{InMemoryDestinationsCache, InMemoryGraphCache},
         config::Config,
         cron::CronService,
-        graph_cache::InMemoryGraphCache,
         http::HttpServer,
         repository::{geospatial::NominatimGeospatialRepository, sqlite::SqliteRepository},
     },
@@ -33,7 +33,12 @@ async fn main() -> anyhow::Result<()> {
             .expect("geo-cache is not valid UTF-8"),
     )
     .expect("unable to build geospatial repository");
-    let schedule_service = ScheduleService::new(repo, InMemoryGraphCache::default(), geospatial);
+    let schedule_service = ScheduleService::new(
+        repo,
+        InMemoryGraphCache::default(),
+        InMemoryDestinationsCache::default(),
+        geospatial,
+    );
     schedule_service.warm(&format!("{}", Utc::now().format("%Y%m%d")));
 
     let cron =

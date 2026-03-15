@@ -13,7 +13,7 @@ use tokio::time::{Instant, sleep_until};
 use crate::{
     app::schedule::ScheduleService,
     infra::{
-        graph_cache::InMemoryGraphCache,
+        caches::{InMemoryDestinationsCache, InMemoryGraphCache},
         importers::gtfs::{
             GTFSRouteType, fetcher::GTFSFetcher, importer::GTFSImporter, parsers::GTFSParser,
         },
@@ -50,6 +50,7 @@ impl CronServiceBuilder {
         schedule_service: ScheduleService<
             SqliteRepository,
             InMemoryGraphCache,
+            InMemoryDestinationsCache,
             NominatimGeospatialRepository,
         >,
     ) -> CronService {
@@ -100,6 +101,7 @@ async fn import_gtfs(
     mut schedule_service: ScheduleService<
         SqliteRepository,
         InMemoryGraphCache,
+        InMemoryDestinationsCache,
         NominatimGeospatialRepository,
     >,
     url: &str,
