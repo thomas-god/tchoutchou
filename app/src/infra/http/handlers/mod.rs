@@ -7,7 +7,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    domain::optim::{City, CityId, DestinationFilters},
+    domain::optim::{City, CityId},
     infra::http::AppState,
 };
 
@@ -58,7 +58,6 @@ pub async fn autocomplete_city(
 #[derive(Deserialize)]
 pub struct DestinationsQueryParameters {
     from: i64,
-    max_connections: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -98,18 +97,14 @@ pub struct DestinationsResponse {
 
 pub async fn get_destinations(
     State(state): State<AppState>,
-    Query(DestinationsQueryParameters {
-        from,
-        max_connections,
-    }): Query<DestinationsQueryParameters>,
+    Query(DestinationsQueryParameters { from }): Query<DestinationsQueryParameters>,
 ) -> Result<Json<DestinationsResponse>, StatusCode> {
     let date = Utc::now().date_naive().format("%Y%m%d").to_string();
 
     let origin = CityId::from(from);
-    let filters = DestinationFilters::new(max_connections.unwrap_or(1), 900, 3600 * 12);
     let (destinations, cities) = state
         .schedule
-        .find_destinations(&date, &origin, &filters)
+        .find_destinations(&date, &origin)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let items = destinations

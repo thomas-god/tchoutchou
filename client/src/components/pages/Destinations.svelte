@@ -53,7 +53,7 @@
 		selectedDestination = undefined;
 		let cancelled = false;
 
-		fetchDestinations({ from: currentStop.id, maxConnections: 2 }).then((r) => {
+		fetchDestinations({ from: currentStop.id }).then((r) => {
 			if (!cancelled) {
 				result = r;
 				sortedDestinations = filterAndSortDestinations(result?.destinations ?? [], filters);

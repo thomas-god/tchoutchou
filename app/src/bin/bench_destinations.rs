@@ -2,7 +2,7 @@ use std::{fs::OpenOptions, io::Write, time::Instant};
 
 use app::{
     app::schedule::ScheduleService,
-    domain::optim::{CityId, DestinationFilters},
+    domain::optim::CityId,
     infra::{
         graph_cache::InMemoryGraphCache,
         repository::{geospatial::NominatimGeospatialRepository, sqlite::SqliteRepository},
@@ -120,18 +120,14 @@ fn main() -> anyhow::Result<()> {
 
     let t1 = Instant::now();
     let (trips, _cities) = schedule_service
-        .find_destinations(&cli.date, &origin_id, &DestinationFilters::default())
+        .find_destinations(&cli.date, &origin_id)
         .expect("failed to compute trips");
     let first_ms = t1.elapsed().as_millis();
 
     let mut samples_ms: Vec<u128> = vec![first_ms];
     for _ in 1..cli.runs {
         let t = Instant::now();
-        let _ = schedule_service.find_destinations(
-            &cli.date,
-            &origin_id,
-            &DestinationFilters::default(),
-        );
+        let _ = schedule_service.find_destinations(&cli.date, &origin_id);
         samples_ms.push(t.elapsed().as_millis());
     }
 

@@ -60,19 +60,15 @@ export const autocompleteStation = query(
 // --- Fetch destinations ---
 
 const fetchParamsSchema = z.object({
-	from: z.number(),
-	maxConnections: z.number().int().min(0).max(2).optional()
+	from: z.number()
 });
 
 export const fetchDestinations = query(
 	fetchParamsSchema,
-	async ({ from, maxConnections }): Promise<DestinationsResult> => {
+	async ({ from }): Promise<DestinationsResult> => {
 		const url = getEnv('BACKEND_URL');
 
-		const connectionsParam =
-			maxConnections !== undefined ? `&max_connections=${maxConnections}` : '';
-
-		const destinationsRes = await fetch(`${url}/api/destinations?from=${from}${connectionsParam}`);
+		const destinationsRes = await fetch(`${url}/api/destinations?from=${from}`);
 
 		const { destinations, cities } = (await destinationsRes.json()) as {
 			destinations: {

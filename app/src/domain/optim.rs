@@ -100,9 +100,9 @@ impl DestinationFilters {
 impl Default for DestinationFilters {
     fn default() -> Self {
         Self {
-            max_connections: 1,
+            max_connections: 2,
             min_connection_duration: 900,
-            max_duration: 3600 * 12,
+            max_duration: 3600 * 24,
         }
     }
 }

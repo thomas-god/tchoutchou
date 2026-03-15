@@ -246,11 +246,10 @@ impl<R: ScheduleDataRepository, GC: GraphCache, GR: GeospatialRepository>
         &self,
         date: &str,
         origin: &CityId,
-        filters: &DestinationFilters,
     ) -> Result<(Vec<Trip>, Vec<City>), ()> {
         let graph = self.graph(date)?;
 
-        let destinations = find_trips(origin, &graph, filters);
+        let destinations = find_trips(origin, &graph, &DestinationFilters::default());
 
         let mut city_ids: Vec<CityId> = vec![];
         for trip in &destinations {
@@ -598,7 +597,7 @@ mod tests {
         let service = make_service(mock, geo);
 
         let (trips, cities) = service
-            .find_destinations(TEST_DATE, &cid(1), &DestinationFilters::default())
+            .find_destinations(TEST_DATE, &cid(1))
             .expect("find_destinations should succeed");
 
         assert_eq!(trips.len(), 2); // Direct trip to city 2, and one-connection trip to city 3
@@ -642,7 +641,7 @@ mod tests {
         let service = make_service(mock, geo);
 
         let (_, cities) = service
-            .find_destinations(TEST_DATE, &cid(1), &DestinationFilters::default())
+            .find_destinations(TEST_DATE, &cid(1))
             .expect("find_destinations should succeed");
 
         assert!(cities.iter().any(|c| c.name() == "Paris")); // Origin city included
@@ -678,6 +677,6 @@ mod tests {
         let geo = MockGeospatialRepository::new();
         let service = make_service(mock, geo);
 
-        let _ = service.find_destinations(TEST_DATE, &cid(1), &DestinationFilters::default());
+        let _ = service.find_destinations(TEST_DATE, &cid(1));
     }
 }
