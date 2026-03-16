@@ -74,6 +74,14 @@ impl CronServiceBuilder {
                         "renfe",
                         "https://ssl.renfe.com/gtransit/Fichero_AV_LD/google_transit.zip",
                     ),
+                    (
+                        "eurostar",
+                        "https://integration-storage.dm.eurostar.com/gtfs-prod/gtfs_static_commercial_v2.zip",
+                    ),
+                    (
+                        "trenitalia",
+                        "https://thello.axelor.com/public/gtfs/gtfs.zip",
+                    ),
                 ];
 
                 // Import data sequentially
