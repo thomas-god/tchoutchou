@@ -28,12 +28,20 @@ struct NominatimAddress {
     municipality: Option<String>,
 }
 
+#[derive(Deserialize, Debug, Default)]
+#[serde(default)]
+struct NominatimExtratags {
+    wikidata: Option<String>,
+    wikipedia: Option<String>,
+}
+
 #[derive(Deserialize, Debug)]
 struct NominatimResponse {
     lat: String,
     lon: String,
     osm_id: i64,
     address: NominatimAddress,
+    extratags: NominatimExtratags,
 }
 
 #[derive(Clone)]
@@ -58,6 +66,8 @@ impl NominatimGeospatialRepository {
                 municipality    TEXT,
                 city_lat        REAL NOT NULL,
                 city_lon        REAL NOT NULL,
+                wikidata        TEXT,
+                wikipedia       TEXT,
                 PRIMARY KEY (lat, lon)
             );",
         )?;
@@ -71,7 +81,7 @@ impl NominatimGeospatialRepository {
     fn lookup_cache(&self, lat: f64, lon: f64) -> Option<CityInformation> {
         let conn = self.cache.lock().ok()?;
         conn.query_row(
-            "SELECT city, country, city_lat, city_lon, osm_id
+            "SELECT city, country, city_lat, city_lon, osm_id, wikidata, wikipedia
                 FROM geocode_cache
                 WHERE lat = ?1 AND lon = ?2",
             rusqlite::params![lat, lon],
@@ -81,12 +91,16 @@ impl NominatimGeospatialRepository {
                 let city_lat: f64 = row.get(2)?;
                 let city_lon: f64 = row.get(3)?;
                 let osm_id: String = row.get(4)?;
+                let wikidata: Option<String> = row.get(5)?;
+                let wikipedia: Option<String> = row.get(6)?;
                 Ok(CityInformation::new(
                     city.into(),
                     country.into(),
                     city_lat,
                     city_lon,
                     osm_id.into(),
+                    wikidata,
+                    wikipedia,
                 ))
             },
         )
@@ -97,8 +111,8 @@ impl NominatimGeospatialRepository {
         if let Ok(conn) = self.cache.lock() {
             let _ = conn.execute(
                 "INSERT OR IGNORE INTO geocode_cache
-                    (lat, lon, osm_id, city, country, city_lat, city_lon)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    (lat, lon, osm_id, city, country, city_lat, city_lon, wikidata, wikipedia)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 rusqlite::params![
                     lat,
                     lon,
@@ -107,6 +121,8 @@ impl NominatimGeospatialRepository {
                     info.country(),
                     info.lat(),
                     info.lon(),
+                    info.wikidata().as_ref(),
+                    info.wikipedia().as_ref(),
                 ],
             );
         }
@@ -127,6 +143,7 @@ impl NominatimGeospatialRepository {
                 ("format", "json".to_string()),
                 ("zoom", "10".to_string()),
                 ("addressdetails", "1".to_string()),
+                ("extratags", "1".to_string()),
             ])
             .send()
             .await
@@ -165,6 +182,8 @@ impl NominatimGeospatialRepository {
             city_lat,
             city_lon,
             nominatim.osm_id.to_string().into(),
+            nominatim.extratags.wikidata,
+            nominatim.extratags.wikipedia,
         );
         self.store_cache(lat, lon, &info);
         Ok(info)
@@ -288,8 +307,29 @@ mod tests {
     // ---- reverse_geocode (HTTP) ----
 
     fn nominatim_body(city: &str, country: &str) -> String {
+        nominatim_body_with_extratags(city, country, None, None)
+    }
+
+    fn nominatim_body_with_extratags(
+        city: &str,
+        country: &str,
+        wikidata: Option<&str>,
+        wikipedia: Option<&str>,
+    ) -> String {
+        let mut extratags_parts = vec![];
+        if let Some(wd) = wikidata {
+            extratags_parts.push(format!(r#""wikidata":"{}""#, wd));
+        }
+        if let Some(wp) = wikipedia {
+            extratags_parts.push(format!(r#""wikipedia":"{}""#, wp));
+        }
+        let extratags = if extratags_parts.is_empty() {
+            "{}".to_string()
+        } else {
+            format!("{{{}}}", extratags_parts.join(","))
+        };
         format!(
-            r#"{{"lat":"45.75","lon":"4.85","osm_id":123,"address":{{"city":"{city}","country":"{country}"}}}}"#
+            r#"{{"lat":"45.75","lon":"4.85","osm_id":123,"address":{{"city":"{city}","country":"{country}"}},"extratags":{extratags}}}"#
         )
     }
 
@@ -343,7 +383,7 @@ mod tests {
             .with_status(200)
             .with_header("Content-Type", "application/json")
             .with_body(
-                r#"{"lat":"45.75","lon":"4.85","osm_id":123,"address":{"country":"France"}}"#,
+                r#"{"lat":"45.75","lon":"4.85","osm_id":123,"address":{"country":"France"},"extratags":{}}"#,
             )
             .create_async()
             .await;
@@ -404,7 +444,7 @@ mod tests {
             .match_query(Matcher::Any)
             .with_status(200)
             .with_header("Content-Type", "application/json")
-            .with_body(r#"{"lat":"N/A","lon":"N/A","osm_id":123,"address":{"city":"Lyon","country":"France"}}"#)
+            .with_body(r#"{"lat":"N/A","lon":"N/A","osm_id":123,"address":{"city":"Lyon","country":"France"},"extratags":{}}"#,)
             .create_async()
             .await;
 
@@ -503,5 +543,125 @@ mod tests {
             result.mapping.get(&ImportedStationId::from("A".to_owned())),
             result.mapping.get(&ImportedStationId::from("B".to_owned()))
         );
+    }
+
+    // ---- wikidata/wikipedia fields ----
+
+    #[tokio::test]
+    async fn reverse_geocode_extracts_wikidata_and_wikipedia() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/reverse")
+            .match_query(Matcher::Any)
+            .with_status(200)
+            .with_header("Content-Type", "application/json")
+            .with_body(nominatim_body_with_extratags(
+                "Paris",
+                "France",
+                Some("Q90"),
+                Some("fr:Paris"),
+            ))
+            .create_async()
+            .await;
+
+        let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
+        let result = repo.reverse_geocode(48.85, 2.35).await.unwrap();
+
+        assert_eq!(result.wikidata(), &Some("Q90".to_string()));
+        assert_eq!(result.wikipedia(), &Some("fr:Paris".to_string()));
+        mock.assert();
+    }
+
+    #[tokio::test]
+    async fn reverse_geocode_extracts_only_wikidata_when_wikipedia_missing() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/reverse")
+            .match_query(Matcher::Any)
+            .with_status(200)
+            .with_header("Content-Type", "application/json")
+            .with_body(nominatim_body_with_extratags(
+                "Lyon",
+                "France",
+                Some("Q456"),
+                None,
+            ))
+            .create_async()
+            .await;
+
+        let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
+        let result = repo.reverse_geocode(45.75, 4.85).await.unwrap();
+
+        assert_eq!(result.wikidata(), &Some("Q456".to_string()));
+        assert_eq!(result.wikipedia(), &None);
+    }
+
+    #[tokio::test]
+    async fn reverse_geocode_extracts_only_wikipedia_when_wikidata_missing() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/reverse")
+            .match_query(Matcher::Any)
+            .with_status(200)
+            .with_header("Content-Type", "application/json")
+            .with_body(nominatim_body_with_extratags(
+                "Marseille",
+                "France",
+                None,
+                Some("fr:Marseille"),
+            ))
+            .create_async()
+            .await;
+
+        let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
+        let result = repo.reverse_geocode(43.30, 5.40).await.unwrap();
+
+        assert_eq!(result.wikidata(), &None);
+        assert_eq!(result.wikipedia(), &Some("fr:Marseille".to_string()));
+    }
+
+    #[tokio::test]
+    async fn reverse_geocode_handles_both_fields_absent() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/reverse")
+            .match_query(Matcher::Any)
+            .with_status(200)
+            .with_header("Content-Type", "application/json")
+            .with_body(nominatim_body("Nice", "France"))
+            .create_async()
+            .await;
+
+        let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
+        let result = repo.reverse_geocode(43.70, 7.25).await.unwrap();
+
+        assert_eq!(result.wikidata(), &None);
+        assert_eq!(result.wikipedia(), &None);
+    }
+
+    #[tokio::test]
+    async fn cache_preserves_wikidata_and_wikipedia() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/reverse")
+            .match_query(Matcher::Any)
+            .with_status(200)
+            .with_header("Content-Type", "application/json")
+            .with_body(nominatim_body_with_extratags(
+                "Bordeaux",
+                "France",
+                Some("Q1479"),
+                Some("fr:Bordeaux"),
+            ))
+            .expect(1)
+            .create_async()
+            .await;
+
+        let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
+        let _ = repo.reverse_geocode(44.84, -0.58).await.unwrap();
+        let cached = repo.reverse_geocode(44.84, -0.58).await.unwrap();
+
+        assert_eq!(cached.wikidata(), &Some("Q1479".to_string()));
+        assert_eq!(cached.wikipedia(), &Some("fr:Bordeaux".to_string()));
     }
 }

@@ -29,6 +29,8 @@ pub struct CityInformation {
     lat: f64,
     lon: f64,
     import_key: CityImportKey,
+    wikidata: Option<String>,
+    wikipedia: Option<String>,
 }
 
 impl CityInformation {
@@ -50,6 +52,14 @@ impl CityInformation {
 
     pub fn import_key(&self) -> &CityImportKey {
         &self.import_key
+    }
+
+    pub fn wikidata(&self) -> &Option<String> {
+        &self.wikidata
+    }
+
+    pub fn wikipedia(&self) -> &Option<String> {
+        &self.wikipedia
     }
 }
 

@@ -90,6 +90,8 @@ impl SqliteRepository {
                 name        TEXT NOT NULL,
                 lat         REAL NOT NULL,
                 lon         REAL NOT NULL,
+                wikidata    TEXT,
+                wikipedia   TEXT,
                 import_key  TEXT NOT NULL,
                 parent      INTEGER REFERENCES t_cities(id),
                 UNIQUE (import_key)
@@ -303,13 +305,15 @@ impl SqliteRepository {
     ) {
         let mut insert_city = tx
             .prepare_cached(
-                "INSERT INTO t_cities (import_key, country, name, lat, lon)
-                VALUES (?1, ?2, ?3, ?4, ?5)
+                "INSERT INTO t_cities (import_key, country, name, lat, lon, wikidata, wikipedia)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                 ON CONFLICT (import_key) DO UPDATE SET
                     name = excluded.name,
                     country = excluded.country,
                     lat = excluded.lat,
-                    lon = excluded.lon
+                    lon = excluded.lon,
+                    wikidata = excluded.wikidata,
+                    wikipedia = excluded.wikipedia
                 RETURNING id;",
             )
             .expect("insert_cities: prepare failed");
@@ -327,7 +331,9 @@ impl SqliteRepository {
                     city.country(),
                     city.name(),
                     city.lat(),
-                    city.lon()
+                    city.lon(),
+                    city.wikidata(),
+                    city.wikipedia()
                 ],
                 |row| row.get::<_, i64>(0).map(CityId::from),
             ) else {
@@ -567,6 +573,21 @@ impl SqliteRepository {
         .map(|r| r.expect("all_cities: row mapping failed"))
         .collect()
     }
+
+    /// Test helper to verify wikidata/wikipedia are stored correctly
+    fn get_city_metadata(&self, city_id: i64) -> Option<(Option<String>, Option<String>)> {
+        self.conn
+            .query_row(
+                "SELECT wikidata, wikipedia FROM t_cities WHERE id = ?1",
+                params![city_id],
+                |row| {
+                    let wikidata: Option<String> = row.get(0)?;
+                    let wikipedia: Option<String> = row.get(1)?;
+                    Ok((wikidata, wikipedia))
+                },
+            )
+            .ok()
+    }
 }
 
 #[cfg(test)]
@@ -634,11 +655,27 @@ mod test_sqlite {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".into(), "country".into(), 0.0, 0.0, "key".into()),
+                    CityInformation::new(
+                        "city-A".into(),
+                        "country".into(),
+                        0.0,
+                        0.0,
+                        "key".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
+                    ),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".into(), "country".into(), 0.0, 0.0, "key".into()),
+                    CityInformation::new(
+                        "city-B".into(),
+                        "country".into(),
+                        0.0,
+                        0.0,
+                        "key".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
+                    ),
                 ),
             ]),
         ));
@@ -655,11 +692,27 @@ mod test_sqlite {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".into(), "country".into(), 0.0, 0.0, "key".into()),
+                    CityInformation::new(
+                        "city-A".into(),
+                        "country".into(),
+                        0.0,
+                        0.0,
+                        "key".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
+                    ),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".into(), "country".into(), 0.0, 0.0, "key".into()),
+                    CityInformation::new(
+                        "city-B".into(),
+                        "country".into(),
+                        0.0,
+                        0.0,
+                        "key".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
+                    ),
                 ),
             ]),
         );
@@ -683,11 +736,27 @@ mod test_sqlite {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".into(), "country".into(), 0.0, 0.0, "key".into()),
+                    CityInformation::new(
+                        "city-A".into(),
+                        "country".into(),
+                        0.0,
+                        0.0,
+                        "key".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
+                    ),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".into(), "country".into(), 0.0, 0.0, "key".into()),
+                    CityInformation::new(
+                        "city-B".into(),
+                        "country".into(),
+                        0.0,
+                        0.0,
+                        "key".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
+                    ),
                 ),
             ]),
         );
@@ -721,6 +790,8 @@ mod test_sqlite {
                         0.0,
                         0.0,
                         "key-1".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
                     ),
                 ),
                 (
@@ -731,6 +802,8 @@ mod test_sqlite {
                         0.0,
                         0.0,
                         "key-2".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
                     ),
                 ),
             ]),
@@ -763,6 +836,8 @@ mod test_sqlite {
                         0.0,
                         0.0,
                         "key".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
                     ),
                 ),
                 (
@@ -773,6 +848,8 @@ mod test_sqlite {
                         0.0,
                         0.0,
                         "key".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
                     ),
                 ),
             ]),
@@ -799,11 +876,27 @@ mod test_sqlite {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".into(), "country".into(), 0.0, 0.0, "key".into()),
+                    CityInformation::new(
+                        "city-A".into(),
+                        "country".into(),
+                        0.0,
+                        0.0,
+                        "key".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
+                    ),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".into(), "country".into(), 0.0, 0.0, "key".into()),
+                    CityInformation::new(
+                        "city-B".into(),
+                        "country".into(),
+                        0.0,
+                        0.0,
+                        "key".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
+                    ),
                 ),
             ]),
         );
@@ -838,6 +931,8 @@ mod test_sqlite {
                     48.8566,
                     2.3522,
                     "key".into(),
+                    Some("wikidata".to_string()),
+                    Some("wikipedia".to_string()),
                 ),
             )]),
         );
@@ -877,6 +972,8 @@ mod test_sqlite {
                         48.8566,
                         2.3522,
                         "key-1".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
                     ),
                 ),
                 (
@@ -887,6 +984,8 @@ mod test_sqlite {
                         51.5074,
                         -0.1278,
                         "key-2".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
                     ),
                 ),
                 (
@@ -897,6 +996,8 @@ mod test_sqlite {
                         52.5200,
                         13.4050,
                         "key-3".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
                     ),
                 ),
             ]),
@@ -945,6 +1046,8 @@ mod test_sqlite {
                         48.8566,
                         2.3522,
                         "key-1".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
                     ),
                 ),
                 (
@@ -955,6 +1058,8 @@ mod test_sqlite {
                         51.5074,
                         -0.1278,
                         "key-2".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
                     ),
                 ),
             ]),
@@ -991,6 +1096,8 @@ mod test_sqlite {
                         48.8566,
                         2.3522,
                         "key-1".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
                     ),
                 ),
                 (
@@ -1001,6 +1108,8 @@ mod test_sqlite {
                         48.9000,
                         2.4000,
                         "key-2".into(),
+                        Some("wikidata".to_string()),
+                        Some("wikipedia".to_string()),
                     ),
                 ),
             ]),
@@ -1060,6 +1169,8 @@ mod test_sqlite {
                     1.0,
                     2.0,
                     "key-paris".into(),
+                    Some("wikidata".to_string()),
+                    Some("wikipedia".to_string()),
                 ),
             )]),
         );
@@ -1078,6 +1189,8 @@ mod test_sqlite {
                     48.8566,
                     2.3522,
                     "key-paris".into(),
+                    Some("wikidata".to_string()),
+                    Some("wikipedia".to_string()),
                 ),
             )]),
         );
@@ -1116,6 +1229,8 @@ mod test_sqlite {
                     48.8566,
                     2.3522,
                     "key-paris".into(),
+                    Some("wikidata".to_string()),
+                    Some("wikipedia".to_string()),
                 ),
             )]),
         );
@@ -1134,6 +1249,8 @@ mod test_sqlite {
                     48.8566,
                     2.3522,
                     "key-paris".into(),
+                    Some("wikidata".to_string()),
+                    Some("wikipedia".to_string()),
                 ),
             )]),
         );
@@ -1173,6 +1290,8 @@ mod test_sqlite {
                     1.0,
                     2.0,
                     "key-paris".into(),
+                    Some("wikidata".to_string()),
+                    Some("wikipedia".to_string()),
                 ),
             )]),
         );
@@ -1191,6 +1310,8 @@ mod test_sqlite {
                     48.8566,
                     2.3522,
                     "key-paris".into(),
+                    Some("wikidata".to_string()),
+                    Some("wikipedia".to_string()),
                 ),
             )]),
         );
@@ -1205,6 +1326,271 @@ mod test_sqlite {
             old_results.len(),
             0,
             "Old name should no longer be findable after upsert"
+        );
+    }
+
+    // ---- wikidata/wikipedia field tests ----
+
+    #[test]
+    fn test_wikidata_and_wikipedia_are_stored() {
+        let mut repo = make_repo();
+        let data = data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "Paris".into(),
+                    "France".into(),
+                    48.8566,
+                    2.3522,
+                    "key-paris".into(),
+                    Some("Q90".to_string()),
+                    Some("fr:Paris".to_string()),
+                ),
+            )]),
+        );
+
+        repo.import_timetable(data);
+
+        let cities = repo.all_cities();
+        assert_eq!(cities.len(), 1);
+        let city_id = cities[0].id().as_i64();
+
+        let metadata = repo
+            .get_city_metadata(city_id)
+            .expect("City metadata should exist");
+        assert_eq!(metadata.0, Some("Q90".to_string()));
+        assert_eq!(metadata.1, Some("fr:Paris".to_string()));
+    }
+
+    #[test]
+    fn test_wikidata_and_wikipedia_can_be_none() {
+        let mut repo = make_repo();
+        let data = data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "SmallTown".into(),
+                    "France".into(),
+                    45.0,
+                    1.0,
+                    "key-smalltown".into(),
+                    None,
+                    None,
+                ),
+            )]),
+        );
+
+        repo.import_timetable(data);
+
+        let cities = repo.all_cities();
+        assert_eq!(cities.len(), 1);
+        let city_id = cities[0].id().as_i64();
+
+        let metadata = repo
+            .get_city_metadata(city_id)
+            .expect("City metadata should exist");
+        assert_eq!(metadata.0, None);
+        assert_eq!(metadata.1, None);
+    }
+
+    #[test]
+    fn test_only_wikidata_present() {
+        let mut repo = make_repo();
+        let data = data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "Lyon".into(),
+                    "France".into(),
+                    45.75,
+                    4.85,
+                    "key-lyon".into(),
+                    Some("Q456".to_string()),
+                    None,
+                ),
+            )]),
+        );
+
+        repo.import_timetable(data);
+
+        let cities = repo.all_cities();
+        let city_id = cities[0].id().as_i64();
+        let metadata = repo.get_city_metadata(city_id).unwrap();
+        assert_eq!(metadata.0, Some("Q456".to_string()));
+        assert_eq!(metadata.1, None);
+    }
+
+    #[test]
+    fn test_only_wikipedia_present() {
+        let mut repo = make_repo();
+        let data = data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "Marseille".into(),
+                    "France".into(),
+                    43.3,
+                    5.4,
+                    "key-marseille".into(),
+                    None,
+                    Some("fr:Marseille".to_string()),
+                ),
+            )]),
+        );
+
+        repo.import_timetable(data);
+
+        let cities = repo.all_cities();
+        let city_id = cities[0].id().as_i64();
+        let metadata = repo.get_city_metadata(city_id).unwrap();
+        assert_eq!(metadata.0, None);
+        assert_eq!(metadata.1, Some("fr:Marseille".to_string()));
+    }
+
+    #[test]
+    fn test_upsert_updates_wikidata_and_wikipedia() {
+        let mut repo = make_repo();
+
+        // First import with some metadata
+        let first = data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "Paris".into(),
+                    "France".into(),
+                    48.8566,
+                    2.3522,
+                    "key-paris".into(),
+                    Some("Q90_old".to_string()),
+                    Some("en:Paris_old".to_string()),
+                ),
+            )]),
+        );
+        repo.import_timetable(first);
+
+        let cities = repo.all_cities();
+        let city_id = cities[0].id().as_i64();
+        let metadata_before = repo.get_city_metadata(city_id).unwrap();
+        assert_eq!(metadata_before.0, Some("Q90_old".to_string()));
+        assert_eq!(metadata_before.1, Some("en:Paris_old".to_string()));
+
+        // Second import with updated metadata
+        let second = data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "Paris".into(),
+                    "France".into(),
+                    48.8566,
+                    2.3522,
+                    "key-paris".into(),
+                    Some("Q90".to_string()),
+                    Some("fr:Paris".to_string()),
+                ),
+            )]),
+        );
+        repo.import_timetable(second);
+
+        let cities = repo.all_cities();
+        assert_eq!(
+            cities.len(),
+            1,
+            "Should still have only one city after upsert"
+        );
+        let city_id = cities[0].id().as_i64();
+        let metadata_after = repo.get_city_metadata(city_id).unwrap();
+        assert_eq!(
+            metadata_after.0,
+            Some("Q90".to_string()),
+            "Wikidata should be updated"
+        );
+        assert_eq!(
+            metadata_after.1,
+            Some("fr:Paris".to_string()),
+            "Wikipedia should be updated"
+        );
+    }
+
+    #[test]
+    fn test_upsert_can_clear_wikidata_and_wikipedia() {
+        let mut repo = make_repo();
+
+        // First import with metadata
+        let first = data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "Paris".into(),
+                    "France".into(),
+                    48.8566,
+                    2.3522,
+                    "key-paris".into(),
+                    Some("Q90".to_string()),
+                    Some("fr:Paris".to_string()),
+                ),
+            )]),
+        );
+        repo.import_timetable(first);
+
+        // Second import with None values
+        let second = data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "Paris".into(),
+                    "France".into(),
+                    48.8566,
+                    2.3522,
+                    "key-paris".into(),
+                    None,
+                    None,
+                ),
+            )]),
+        );
+        repo.import_timetable(second);
+
+        let cities = repo.all_cities();
+        let city_id = cities[0].id().as_i64();
+        let metadata = repo.get_city_metadata(city_id).unwrap();
+        assert_eq!(
+            metadata.0, None,
+            "Wikidata should be cleared on upsert with None"
+        );
+        assert_eq!(
+            metadata.1, None,
+            "Wikipedia should be cleared on upsert with None"
         );
     }
 }
