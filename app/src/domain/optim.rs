@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use derive_more::{Constructor, From};
+use derive_more::{AsRef, Constructor, Deref, From, FromStr};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, From)]
 pub struct CityId(i64);
@@ -15,11 +15,21 @@ impl CityId {
     }
 }
 
+#[derive(Debug, Clone, From, FromStr, Constructor, PartialEq, PartialOrd, AsRef, Deref)]
+#[from(&str, String)]
+#[as_ref(str, String)]
+pub struct CityName(String);
+
+#[derive(Debug, Clone, From, FromStr, Constructor, PartialEq, PartialOrd, AsRef, Deref)]
+#[from(&str, String)]
+#[as_ref(str, String)]
+pub struct CityCountry(String);
+
 #[derive(Debug, Clone, Constructor)]
 pub struct City {
     id: CityId,
-    name: String,
-    country: String,
+    name: CityName,
+    country: CityCountry,
     lat: f64,
     lon: f64,
 }
@@ -28,10 +38,10 @@ impl City {
     pub fn id(&self) -> &CityId {
         &self.id
     }
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &CityName {
         &self.name
     }
-    pub fn country(&self) -> &str {
+    pub fn country(&self) -> &CityCountry {
         &self.country
     }
     pub fn lat(&self) -> f64 {

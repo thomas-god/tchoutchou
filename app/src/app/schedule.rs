@@ -4,25 +4,17 @@ use std::{
     time::Instant,
 };
 
-use derive_more::{AsRef, Constructor, From, FromStr};
+use derive_more::{Constructor, From};
 
 use crate::{
     app::{
         ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation, ImportedStationId,
         ImportedTripLeg, TrainDataToImport,
     },
-    domain::optim::{City, CityId, DestinationFilters, Graph, Trip, TripLeg, find_trips},
+    domain::optim::{
+        City, CityCountry, CityId, CityName, DestinationFilters, Graph, Trip, TripLeg, find_trips,
+    },
 };
-
-#[derive(Debug, Clone, From, FromStr, Constructor, PartialEq, PartialOrd, AsRef)]
-#[from(&str, String)]
-#[as_ref(str, String)]
-pub struct CityName(String);
-
-#[derive(Debug, Clone, From, FromStr, Constructor, PartialEq, PartialOrd, AsRef)]
-#[from(&str, String)]
-#[as_ref(str, String)]
-pub struct CityCountry(String);
 
 #[derive(Debug, Clone, Constructor, PartialEq, PartialOrd)]
 pub struct CityInformation {
@@ -583,27 +575,9 @@ mod tests {
             InternalTripLeg::new(siid(2), siid(3), 1200, 1300),
         ];
         let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2)), (siid(3), cid(3))]);
-        let paris = City::new(
-            cid(1),
-            "Paris".to_string(),
-            "France".to_string(),
-            48.8566,
-            2.3522,
-        );
-        let london = City::new(
-            cid(2),
-            "London".to_string(),
-            "UK".to_string(),
-            51.5074,
-            -0.1278,
-        );
-        let berlin = City::new(
-            cid(3),
-            "Berlin".to_string(),
-            "Germany".to_string(),
-            52.5200,
-            13.4050,
-        );
+        let paris = City::new(cid(1), "Paris".into(), "France".into(), 48.8566, 2.3522);
+        let london = City::new(cid(2), "London".into(), "UK".into(), 51.5074, -0.1278);
+        let berlin = City::new(cid(3), "Berlin".into(), "Germany".into(), 52.5200, 13.4050);
 
         let mut mock = MockScheduleDataRepository::new();
         mock.expect_legs_for_date()
@@ -626,29 +600,17 @@ mod tests {
 
         assert_eq!(trips.len(), 2); // Direct trip to city 2, and one-connection trip to city 3
         assert_eq!(cities.len(), 3); // Paris, London, Berlin
-        assert!(cities.iter().any(|c| c.name() == "Paris"));
-        assert!(cities.iter().any(|c| c.name() == "London"));
-        assert!(cities.iter().any(|c| c.name() == "Berlin"));
+        assert!(cities.iter().any(|c| *c.name() == "Paris".into()));
+        assert!(cities.iter().any(|c| *c.name() == "London".into()));
+        assert!(cities.iter().any(|c| *c.name() == "Berlin".into()));
     }
 
     #[test]
     fn find_destinations_includes_origin_city() {
         let trips = vec![InternalTripLeg::new(siid(1), siid(2), 100, 200)];
         let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2))]);
-        let paris = City::new(
-            cid(1),
-            "Paris".to_string(),
-            "France".to_string(),
-            48.8566,
-            2.3522,
-        );
-        let london = City::new(
-            cid(2),
-            "London".to_string(),
-            "UK".to_string(),
-            51.5074,
-            -0.1278,
-        );
+        let paris = City::new(cid(1), "Paris".into(), "France".into(), 48.8566, 2.3522);
+        let london = City::new(cid(2), "London".into(), "UK".into(), 51.5074, -0.1278);
 
         let mut mock = MockScheduleDataRepository::new();
         mock.expect_legs_for_date()
@@ -668,7 +630,7 @@ mod tests {
             .find_destinations(TEST_DATE, &cid(1))
             .expect("find_destinations should succeed");
 
-        assert!(cities.iter().any(|c| c.name() == "Paris")); // Origin city included
+        assert!(cities.iter().any(|c| c.name() == &"Paris".into())); // Origin city included
     }
 
     #[test]
@@ -768,7 +730,7 @@ mod tests {
     async fn ingest_invalidates_destinations_cache() {
         let trips = vec![InternalTripLeg::new(siid(1), siid(2), 100, 200)];
         let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2))]);
-        let city = City::new(cid(2), "London".to_string(), "UK".to_string(), 51.5, -0.1);
+        let city = City::new(cid(2), "London".into(), "UK".into(), 51.5, -0.1);
 
         let mut mock = MockScheduleDataRepository::new();
         mock.expect_import_timetable()

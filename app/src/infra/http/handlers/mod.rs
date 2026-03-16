@@ -27,7 +27,7 @@ pub struct AutocompleteCityResponseItem {
 impl From<City> for AutocompleteCityResponseItem {
     fn from(value: City) -> Self {
         Self {
-            name: value.name().to_owned(),
+            name: value.name().to_string(),
             id: value.id().as_i64(),
         }
     }
@@ -81,8 +81,8 @@ impl From<City> for CityResponseItem {
     fn from(city: City) -> Self {
         Self {
             id: city.id().as_i64(),
-            name: city.name().to_owned(),
-            country: city.country().to_owned(),
+            name: city.name().to_string(),
+            country: city.country().to_string(),
             lat: city.lat(),
             lon: city.lon(),
         }

@@ -11,11 +11,11 @@ use crate::{
         ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation, ImportedStationId,
         ImportedTripLeg,
         schedule::{
-            CityCountry, CityInformation, CityName, InternalStationId, InternalTripLeg,
-            ScheduleDataImportResult, ScheduleDataRepository, ScheduleDataToImport,
+            CityInformation, InternalStationId, InternalTripLeg, ScheduleDataImportResult,
+            ScheduleDataRepository, ScheduleDataToImport,
         },
     },
-    domain::optim::{City, CityId},
+    domain::optim::{City, CityCountry, CityId, CityName},
 };
 
 pub struct SqliteRepository {
@@ -402,7 +402,13 @@ impl ScheduleDataRepository for SqliteRepository {
             let name: String = row.get(2)?;
             let lat: f64 = row.get(3)?;
             let lon: f64 = row.get(4)?;
-            Ok(City::new(CityId::from(id), name, country, lat, lon))
+            Ok(City::new(
+                CityId::from(id),
+                name.into(),
+                country.into(),
+                lat,
+                lon,
+            ))
         })
         .expect("search_cities_by_name: query failed")
         .map(|r| r.expect("search_cities_by_name: row mapping failed"))
@@ -449,7 +455,13 @@ impl ScheduleDataRepository for SqliteRepository {
             let name: String = row.get(2)?;
             let lat: f64 = row.get(3)?;
             let lon: f64 = row.get(4)?;
-            Ok(City::new(CityId::from(id), name, country, lat, lon))
+            Ok(City::new(
+                CityId::from(id),
+                name.into(),
+                country.into(),
+                lat,
+                lon,
+            ))
         })
         .expect("cities_by_ids: query failed")
         .map(|r| r.expect("cities_by_ids: row mapping failed"))
@@ -517,7 +529,13 @@ impl SqliteRepository {
             let name: String = row.get(2)?;
             let lat: f64 = row.get(3)?;
             let lon: f64 = row.get(4)?;
-            Ok(City::new(CityId::from(id), name, country, lat, lon))
+            Ok(City::new(
+                CityId::from(id),
+                name.into(),
+                country.into(),
+                lat,
+                lon,
+            ))
         })
         .expect("all_cities: query failed")
         .map(|r| r.expect("all_cities: row mapping failed"))
@@ -773,8 +791,8 @@ mod test_sqlite {
         let cities = repo.all_cities();
         assert_eq!(cities.len(), 1);
         let city = &cities[0];
-        assert_eq!(city.name(), "Paris");
-        assert_eq!(city.country(), "France");
+        assert_eq!(*city.name(), "Paris".into());
+        assert_eq!(*city.country(), "France".into());
         assert_eq!(city.lat(), 48.8566);
         assert_eq!(city.lon(), 2.3522);
     }
@@ -821,11 +839,9 @@ mod test_sqlite {
         let cities = repo.cities_by_ids(&requested_ids);
 
         assert_eq!(cities.len(), 2);
-        assert!(
-            cities
-                .iter()
-                .any(|c| c.name() == "Paris" || c.name() == "London" || c.name() == "Berlin")
-        );
+        assert!(cities.iter().any(|c| *c.name() == "Paris".into()
+            || *c.name() == "London".into()
+            || *c.name() == "Berlin".into()));
     }
 
     #[test]
@@ -902,10 +918,10 @@ mod test_sqlite {
         );
 
         // Verify both cities have the same name and country but different coordinates
-        assert_eq!(cities[0].name(), "Paris");
-        assert_eq!(cities[0].country(), "France");
-        assert_eq!(cities[1].name(), "Paris");
-        assert_eq!(cities[1].country(), "France");
+        assert_eq!(*cities[0].name(), "Paris".into());
+        assert_eq!(*cities[0].country(), "France".into());
+        assert_eq!(*cities[1].name(), "Paris".into());
+        assert_eq!(*cities[1].country(), "France".into());
 
         // Verify coordinates are different
         assert_ne!(

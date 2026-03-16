@@ -6,12 +6,15 @@ use std::{
 use rusqlite::Connection;
 use serde::Deserialize;
 
-use crate::app::{
-    ImportedStation,
-    schedule::{
-        CityInformation, CityName, FailureReason, GeospatialMappingFailure,
-        GeospatialMappingResult, GeospatialRepository,
+use crate::{
+    app::{
+        ImportedStation,
+        schedule::{
+            CityInformation, FailureReason, GeospatialMappingFailure, GeospatialMappingResult,
+            GeospatialRepository,
+        },
     },
+    domain::optim::CityName,
 };
 
 #[derive(Deserialize, Debug, Default)]
