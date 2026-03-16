@@ -91,6 +91,7 @@ impl SqliteRepository {
                 lat         REAL NOT NULL,
                 lon         REAL NOT NULL,
                 import_key  TEXT NOT NULL,
+                parent      INTEGER REFERENCES t_cities(id),
                 UNIQUE (import_key)
             );
 
@@ -408,7 +409,7 @@ impl ScheduleDataRepository for SqliteRepository {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, country, name, lat, lon FROM t_cities
+                "SELECT id, country, name, lat, lon, parent FROM t_cities
                  WHERE LOWER(name) LIKE LOWER(?1)
                  ORDER BY name
                  LIMIT ?2",
@@ -421,12 +422,14 @@ impl ScheduleDataRepository for SqliteRepository {
             let name: String = row.get(2)?;
             let lat: f64 = row.get(3)?;
             let lon: f64 = row.get(4)?;
+            let parent: Option<i64> = row.get(5)?;
             Ok(City::new(
                 CityId::from(id),
                 name.into(),
                 country.into(),
                 lat,
                 lon,
+                parent.map(CityId::from),
             ))
         })
         .expect("search_cities_by_name: query failed")
@@ -458,7 +461,7 @@ impl ScheduleDataRepository for SqliteRepository {
 
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let query = format!(
-            "SELECT id, country, name, lat, lon FROM t_cities WHERE id IN ({}) ORDER BY id",
+            "SELECT id, country, name, lat, lon, parent FROM t_cities WHERE id IN ({}) ORDER BY id",
             placeholders
         );
 
@@ -474,12 +477,14 @@ impl ScheduleDataRepository for SqliteRepository {
             let name: String = row.get(2)?;
             let lat: f64 = row.get(3)?;
             let lon: f64 = row.get(4)?;
+            let parent: Option<i64> = row.get(5)?;
             Ok(City::new(
                 CityId::from(id),
                 name.into(),
                 country.into(),
                 lat,
                 lon,
+                parent.map(CityId::from),
             ))
         })
         .expect("cities_by_ids: query failed")
@@ -539,7 +544,7 @@ impl SqliteRepository {
     fn all_cities(&self) -> Vec<City> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, country, name, lat, lon FROM t_cities ORDER BY id")
+            .prepare("SELECT id, country, name, lat, lon, parent FROM t_cities ORDER BY id")
             .expect("all_cities: prepare failed");
 
         stmt.query_map([], |row| {
@@ -548,12 +553,14 @@ impl SqliteRepository {
             let name: String = row.get(2)?;
             let lat: f64 = row.get(3)?;
             let lon: f64 = row.get(4)?;
+            let parent: Option<i64> = row.get(5)?;
             Ok(City::new(
                 CityId::from(id),
                 name.into(),
                 country.into(),
                 lat,
                 lon,
+                parent.map(CityId::from),
             ))
         })
         .expect("all_cities: query failed")

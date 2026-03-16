@@ -32,6 +32,7 @@ pub struct City {
     country: CityCountry,
     lat: f64,
     lon: f64,
+    parent: Option<CityId>,
 }
 
 impl City {
@@ -49,6 +50,9 @@ impl City {
     }
     pub fn lon(&self) -> f64 {
         self.lon
+    }
+    pub fn parent(&self) -> &Option<CityId> {
+        &self.parent
     }
 }
 
