@@ -18,7 +18,7 @@
 		<DoubleRange
 			range={{ min: 0, max: 24 * 3600 }}
 			bind:selection={() => filters.duration, (v) => (filters = { ...filters, duration: v })}
-			step={300}
+			step={1800}
 			fmt={displayDuration}
 		/>
 	</div>
