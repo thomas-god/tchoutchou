@@ -9,8 +9,8 @@ struct StopsHeader {
     name: usize,
     lat: usize,
     lon: usize,
-    location_type: usize,
-    parent_station: usize,
+    location_type: Option<usize>,
+    parent_station: Option<usize>,
 }
 
 pub struct StopsParser {
@@ -50,10 +50,8 @@ impl StopsParser {
             name: name.ok_or_else(|| GTFSParseError::MissingColumn("stop_name".to_string()))?,
             lat: lat.ok_or_else(|| GTFSParseError::MissingColumn("stop_lat".to_string()))?,
             lon: lon.ok_or_else(|| GTFSParseError::MissingColumn("stop_lon".to_string()))?,
-            location_type: location_type
-                .ok_or_else(|| GTFSParseError::MissingColumn("location_type".to_string()))?,
-            parent_station: parent_station
-                .ok_or_else(|| GTFSParseError::MissingColumn("parent_station".to_string()))?,
+            location_type,
+            parent_station,
         })
     }
 
@@ -65,22 +63,33 @@ impl StopsParser {
         let mut stops = vec![];
         for row in rows {
             let cols: Vec<&str> = row.split(',').collect();
-            let (Some(id), Some(name), Some(lat), Some(lon), Some(location_type), Some(parent)) = (
+            let (Some(id), Some(name), Some(lat), Some(lon)) = (
                 cols.get(header.id),
                 cols.get(header.name),
                 cols.get(header.lat).and_then(|v| v.parse::<f64>().ok()),
                 cols.get(header.lon).and_then(|v| v.parse::<f64>().ok()),
-                cols.get(header.location_type)
-                    .and_then(|v| GTFSLocationType::from_str(v).ok()),
-                cols.get(header.parent_station),
             ) else {
                 continue;
             };
 
-            let parent_station = if parent.is_empty() {
-                None
-            } else {
-                Some(GTFSStopId::from(parent.to_string()))
+            let Some(location_type) = (match header.location_type {
+                None => Some(GTFSLocationType::Station),
+                Some(idx) => cols
+                    .get(idx)
+                    .and_then(|v| GTFSLocationType::from_str(v).ok()),
+            }) else {
+                continue;
+            };
+
+            let parent_station = match header.parent_station {
+                None => None,
+                Some(idx) => cols.get(idx).and_then(|v| {
+                    if v.is_empty() {
+                        None
+                    } else {
+                        Some(GTFSStopId::from(v.to_string()))
+                    }
+                }),
             };
 
             stops.push(GTFSStop::new(
@@ -179,21 +188,31 @@ mod tests {
     }
 
     #[test]
-    fn missing_location_type_column() {
-        let col = missing_col(
-            StopsParser::from("stop_id,stop_name,stop_lat,stop_lon,parent_station\n".to_string())
-                .parse(),
-        );
-        assert_eq!(col, "location_type");
+    fn missing_location_type_column_defaults_to_station() {
+        let content = "stop_id,stop_name,stop_lat,stop_lon,parent_station\n\
+                       StopArea:S1,Paris Nord,48.8448,2.3735,";
+        let result = StopsParser::from(content.to_string()).parse().unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].location_type(), GTFSLocationType::Station);
     }
 
     #[test]
-    fn missing_parent_station_column() {
-        let col = missing_col(
-            StopsParser::from("stop_id,stop_name,stop_lat,stop_lon,location_type\n".to_string())
-                .parse(),
-        );
-        assert_eq!(col, "parent_station");
+    fn missing_parent_station_column_defaults_to_none() {
+        let content = "stop_id,stop_name,stop_lat,stop_lon,location_type\n\
+                       StopArea:S1,Paris Nord,48.8448,2.3735,1";
+        let result = StopsParser::from(content.to_string()).parse().unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].parent_station(), None);
+    }
+
+    #[test]
+    fn both_optional_columns_absent_applies_defaults() {
+        let content = "stop_id,stop_name,stop_lat,stop_lon\n\
+                       StopArea:S1,Paris Nord,48.8448,2.3735";
+        let result = StopsParser::from(content.to_string()).parse().unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].location_type(), GTFSLocationType::Station);
+        assert_eq!(result[0].parent_station(), None);
     }
 
     #[test]
