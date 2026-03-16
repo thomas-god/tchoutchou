@@ -32,6 +32,7 @@ struct NominatimAddress {
 struct NominatimResponse {
     lat: String,
     lon: String,
+    osm_id: i64,
     address: NominatimAddress,
 }
 
@@ -51,6 +52,7 @@ impl NominatimGeospatialRepository {
             "CREATE TABLE IF NOT EXISTS geocode_cache (
                 lat             REAL NOT NULL,
                 lon             REAL NOT NULL,
+                osm_id          TEXT NOT NULL,
                 city            TEXT NOT NULL,
                 country         TEXT NOT NULL,
                 municipality    TEXT,
@@ -69,7 +71,7 @@ impl NominatimGeospatialRepository {
     fn lookup_cache(&self, lat: f64, lon: f64) -> Option<CityInformation> {
         let conn = self.cache.lock().ok()?;
         conn.query_row(
-            "SELECT city, country, city_lat, city_lon
+            "SELECT city, country, city_lat, city_lon, osm_id
                 FROM geocode_cache
                 WHERE lat = ?1 AND lon = ?2",
             rusqlite::params![lat, lon],
@@ -78,11 +80,13 @@ impl NominatimGeospatialRepository {
                 let country: String = row.get(1)?;
                 let city_lat: f64 = row.get(2)?;
                 let city_lon: f64 = row.get(3)?;
+                let osm_id: String = row.get(4)?;
                 Ok(CityInformation::new(
                     city.into(),
                     country.into(),
                     city_lat,
                     city_lon,
+                    osm_id.into(),
                 ))
             },
         )
@@ -93,11 +97,12 @@ impl NominatimGeospatialRepository {
         if let Ok(conn) = self.cache.lock() {
             let _ = conn.execute(
                 "INSERT OR IGNORE INTO geocode_cache
-                    (lat, lon, city, country, city_lat, city_lon)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    (lat, lon, osm_id, city, country, city_lat, city_lon)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 rusqlite::params![
                     lat,
                     lon,
+                    info.import_key(),
                     info.name(),
                     info.country(),
                     info.lat(),
@@ -125,7 +130,7 @@ impl NominatimGeospatialRepository {
             ])
             .send()
             .await
-            .map_err(|_| FailureReason::NetworkError)?;
+            .map_err(|_| FailureReason::InvalidResponseShape)?;
 
         if !response.status().is_success() {
             let status_code = response.status().as_u16();
@@ -141,7 +146,7 @@ impl NominatimGeospatialRepository {
         let nominatim: NominatimResponse = response
             .json()
             .await
-            .map_err(|_| FailureReason::NetworkError)?;
+            .map_err(|_| FailureReason::InvalidResponseShape)?;
         let city_lat = nominatim
             .lat
             .parse::<f64>()
@@ -154,7 +159,13 @@ impl NominatimGeospatialRepository {
         let city_name = extract_city_name(&addr).ok_or(FailureReason::MissingCityData)?;
         let country = addr.country.ok_or(FailureReason::MissingCityData)?.into();
 
-        let info = CityInformation::new(city_name, country, city_lat, city_lon);
+        let info = CityInformation::new(
+            city_name,
+            country,
+            city_lat,
+            city_lon,
+            nominatim.osm_id.to_string().into(),
+        );
         self.store_cache(lat, lon, &info);
         Ok(info)
     }
@@ -278,7 +289,7 @@ mod tests {
 
     fn nominatim_body(city: &str, country: &str) -> String {
         format!(
-            r#"{{"lat":"45.75","lon":"4.85","address":{{"city":"{city}","country":"{country}"}}}}"#
+            r#"{{"lat":"45.75","lon":"4.85","osm_id":123,"address":{{"city":"{city}","country":"{country}"}}}}"#
         )
     }
 
@@ -331,7 +342,9 @@ mod tests {
             .match_query(Matcher::Any)
             .with_status(200)
             .with_header("Content-Type", "application/json")
-            .with_body(r#"{"lat":"45.75","lon":"4.85","address":{"country":"France"}}"#)
+            .with_body(
+                r#"{"lat":"45.75","lon":"4.85","osm_id":123,"address":{"country":"France"}}"#,
+            )
             .create_async()
             .await;
 
@@ -391,7 +404,7 @@ mod tests {
             .match_query(Matcher::Any)
             .with_status(200)
             .with_header("Content-Type", "application/json")
-            .with_body(r#"{"lat":"N/A","lon":"N/A","address":{"city":"Lyon","country":"France"}}"#)
+            .with_body(r#"{"lat":"N/A","lon":"N/A","osm_id":123,"address":{"city":"Lyon","country":"France"}}"#)
             .create_async()
             .await;
 
@@ -399,6 +412,24 @@ mod tests {
         let result = repo.reverse_geocode(45.75, 4.85).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), FailureReason::InvalidCoordinates);
+    }
+
+    #[tokio::test]
+    async fn reverse_geocode_returns_none_when_osm_id_missing() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/reverse")
+            .match_query(Matcher::Any)
+            .with_status(200)
+            .with_header("Content-Type", "application/json")
+            .with_body(r#"{"lat":"1.2","lon":"1.2","address":{"city":"Lyon","country":"France"}}"#)
+            .create_async()
+            .await;
+
+        let repo = NominatimGeospatialRepository::new(&server.url(), ":memory:").unwrap();
+        let result = repo.reverse_geocode(45.75, 4.85).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), FailureReason::InvalidResponseShape);
     }
 
     // ---- match_stations_to_cities ----

@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use derive_more::{Constructor, From};
+use derive_more::{AsRef, Constructor, From, FromStr};
 
 use crate::{
     app::{
@@ -16,12 +16,19 @@ use crate::{
     },
 };
 
+#[derive(Debug, Clone, From, FromStr, Constructor, PartialEq, PartialOrd, AsRef)]
+#[from(&str, String)]
+#[as_ref(str, String)]
+/// Opaque key to uniquely identify cities during import process. Not domain-facing.
+pub struct CityImportKey(String);
+
 #[derive(Debug, Clone, Constructor, PartialEq, PartialOrd)]
 pub struct CityInformation {
     name: CityName,
     country: CityCountry,
     lat: f64,
     lon: f64,
+    import_key: CityImportKey,
 }
 
 impl CityInformation {
@@ -39,6 +46,10 @@ impl CityInformation {
 
     pub fn lon(&self) -> f64 {
         self.lon
+    }
+
+    pub fn import_key(&self) -> &CityImportKey {
+        &self.import_key
     }
 }
 
@@ -161,7 +172,7 @@ pub enum FailureReason {
     HttpError { status_code: u16 },
     MissingCityData,
     InvalidCoordinates,
-    NetworkError,
+    InvalidResponseShape,
 }
 
 pub trait GeospatialRepository: Clone + Send + Sync + 'static {
