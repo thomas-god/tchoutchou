@@ -85,12 +85,13 @@ impl SqliteRepository {
         self.conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS t_cities (
-                id      INTEGER PRIMARY KEY AUTOINCREMENT,
-                country TEXT NOT NULL,
-                name    TEXT NOT NULL,
-                lat     REAL NOT NULL,
-                lon     REAL NOT NULL,
-                UNIQUE (country, name, lat, lon)
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                country     TEXT NOT NULL,
+                name        TEXT NOT NULL,
+                lat         REAL NOT NULL,
+                lon         REAL NOT NULL,
+                import_key  TEXT NOT NULL,
+                UNIQUE (import_key)
             );
 
             CREATE TABLE IF NOT EXISTS t_stations (
@@ -301,9 +302,13 @@ impl SqliteRepository {
     ) {
         let mut insert_city = tx
             .prepare_cached(
-                "INSERT INTO t_cities (country, name, lat, lon)
-                VALUES (?1, ?2, ?3, ?4)
-                ON CONFLICT (country, name, lat, lon) DO UPDATE SET name = excluded.name
+                "INSERT INTO t_cities (import_key, country, name, lat, lon)
+                VALUES (?1, ?2, ?3, ?4, ?5)
+                ON CONFLICT (import_key) DO UPDATE SET
+                    name = excluded.name,
+                    country = excluded.country,
+                    lat = excluded.lat,
+                    lon = excluded.lon
                 RETURNING id;",
             )
             .expect("insert_cities: prepare failed");
@@ -316,7 +321,13 @@ impl SqliteRepository {
                 continue;
             };
             let Ok(city_id) = insert_city.query_row(
-                params![city.country(), city.name(), city.lat(), city.lon()],
+                params![
+                    city.import_key(),
+                    city.country(),
+                    city.name(),
+                    city.lat(),
+                    city.lon()
+                ],
                 |row| row.get::<_, i64>(0).map(CityId::from),
             ) else {
                 continue;
@@ -697,11 +708,23 @@ mod test_sqlite {
             HashMap::from([
                 (
                     ImportedStationId::from("A".to_string()),
-                    CityInformation::new("city-A".into(), "country".into(), 0.0, 0.0, "key".into()),
+                    CityInformation::new(
+                        "city-A".into(),
+                        "country".into(),
+                        0.0,
+                        0.0,
+                        "key-1".into(),
+                    ),
                 ),
                 (
                     ImportedStationId::from("B".to_string()),
-                    CityInformation::new("city-B".into(), "country".into(), 0.0, 0.0, "key".into()),
+                    CityInformation::new(
+                        "city-B".into(),
+                        "country".into(),
+                        0.0,
+                        0.0,
+                        "key-2".into(),
+                    ),
                 ),
             ]),
         );
@@ -846,7 +869,7 @@ mod test_sqlite {
                         "France".into(),
                         48.8566,
                         2.3522,
-                        "key".into(),
+                        "key-1".into(),
                     ),
                 ),
                 (
@@ -856,7 +879,7 @@ mod test_sqlite {
                         "UK".into(),
                         51.5074,
                         -0.1278,
-                        "key".into(),
+                        "key-2".into(),
                     ),
                 ),
                 (
@@ -866,7 +889,7 @@ mod test_sqlite {
                         "Germany".into(),
                         52.5200,
                         13.4050,
-                        "key".into(),
+                        "key-3".into(),
                     ),
                 ),
             ]),
@@ -914,7 +937,7 @@ mod test_sqlite {
                         "France".into(),
                         48.8566,
                         2.3522,
-                        "key".into(),
+                        "key-1".into(),
                     ),
                 ),
                 (
@@ -924,7 +947,7 @@ mod test_sqlite {
                         "UK".into(),
                         51.5074,
                         -0.1278,
-                        "key".into(),
+                        "key-2".into(),
                     ),
                 ),
             ]),
@@ -960,7 +983,7 @@ mod test_sqlite {
                         "France".into(),
                         48.8566,
                         2.3522,
-                        "key".into(),
+                        "key-1".into(),
                     ),
                 ),
                 (
@@ -970,7 +993,7 @@ mod test_sqlite {
                         "France".into(),
                         48.9000,
                         2.4000,
-                        "key".into(),
+                        "key-2".into(),
                     ),
                 ),
             ]),
@@ -1008,6 +1031,173 @@ mod test_sqlite {
             mapping.get(&InternalStationId::from(1)),
             mapping.get(&InternalStationId::from(2)),
             "Different coordinates should result in different city IDs"
+        );
+    }
+
+    #[test]
+    fn test_reimport_same_import_key_updates_city_metadata() {
+        // A second import with the same import_key should upsert (update) the
+        // existing city row rather than create a duplicate.
+        let mut repo = make_repo();
+
+        let first = data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "Old Name".into(),
+                    "France".into(),
+                    1.0,
+                    2.0,
+                    "key-paris".into(),
+                ),
+            )]),
+        );
+        repo.import_timetable(first);
+
+        let second = data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "Paris".into(),
+                    "France".into(),
+                    48.8566,
+                    2.3522,
+                    "key-paris".into(),
+                ),
+            )]),
+        );
+        repo.import_timetable(second);
+
+        let cities = repo.all_cities();
+        assert_eq!(
+            cities.len(),
+            1,
+            "Reimport with same import_key must not create a duplicate city row"
+        );
+        assert_eq!(
+            *cities[0].name(),
+            "Paris".into(),
+            "City name should be updated on reimport"
+        );
+        assert_eq!(cities[0].lat(), 48.8566);
+    }
+
+    #[test]
+    fn test_cross_source_same_import_key_resolves_to_same_city() {
+        // Two different sources referencing the same import_key should both
+        // end up pointing at the same city row.
+        let mut repo = make_repo();
+
+        let source_a = data_to_import(
+            vec![station("X")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source-a",
+            HashMap::from([(
+                ImportedStationId::from("X".to_string()),
+                CityInformation::new(
+                    "Paris".into(),
+                    "France".into(),
+                    48.8566,
+                    2.3522,
+                    "key-paris".into(),
+                ),
+            )]),
+        );
+        repo.import_timetable(source_a);
+
+        let source_b = data_to_import(
+            vec![station("Y")],
+            vec![schedule("S2", &["20260101"])],
+            vec![],
+            "source-b",
+            HashMap::from([(
+                ImportedStationId::from("Y".to_string()),
+                CityInformation::new(
+                    "Paris".into(),
+                    "France".into(),
+                    48.8566,
+                    2.3522,
+                    "key-paris".into(),
+                ),
+            )]),
+        );
+        repo.import_timetable(source_b);
+
+        let cities = repo.all_cities();
+        assert_eq!(
+            cities.len(),
+            1,
+            "Both sources with the same import_key should share one city row"
+        );
+
+        let mapping = repo.stations_to_city();
+        assert_eq!(mapping.len(), 2);
+        let city_for_x = mapping.get(&InternalStationId::from(1));
+        let city_for_y = mapping.get(&InternalStationId::from(2));
+        assert_eq!(
+            city_for_x, city_for_y,
+            "Stations from different sources with the same import_key should map to the same city"
+        );
+    }
+
+    #[test]
+    fn test_search_cities_by_name_after_upsert_finds_updated_name() {
+        let mut repo = make_repo();
+
+        let first = data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "Old Name".into(),
+                    "France".into(),
+                    1.0,
+                    2.0,
+                    "key-paris".into(),
+                ),
+            )]),
+        );
+        repo.import_timetable(first);
+
+        let second = data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "Paris".into(),
+                    "France".into(),
+                    48.8566,
+                    2.3522,
+                    "key-paris".into(),
+                ),
+            )]),
+        );
+        repo.import_timetable(second);
+
+        let results = repo.search_cities_by_name("Paris", 10);
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].name(), "Paris".into());
+
+        let old_results = repo.search_cities_by_name("Old Name", 10);
+        assert_eq!(
+            old_results.len(),
+            0,
+            "Old name should no longer be findable after upsert"
         );
     }
 }
