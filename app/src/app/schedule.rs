@@ -11,8 +11,9 @@ use crate::{
         ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation, ImportedStationId,
         ImportedTripLeg, TrainDataToImport,
     },
-    domain::optim::{
-        City, CityCountry, CityId, CityName, DestinationFilters, Graph, Trip, TripLeg, find_trips,
+    domain::{
+        City, CityCountry, CityId, CityName,
+        destinations::{DestinationFilters, Graph, Trip, TripLeg, find_trips},
     },
 };
 

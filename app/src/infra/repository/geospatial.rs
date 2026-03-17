@@ -14,7 +14,7 @@ use crate::{
             GeospatialRepository,
         },
     },
-    domain::optim::CityName,
+    domain::CityName,
 };
 
 #[derive(Deserialize, Debug, Default)]

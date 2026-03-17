@@ -4,57 +4,9 @@ use std::{
     time::Instant,
 };
 
-use derive_more::{AsRef, Constructor, Deref, From, FromStr};
+use derive_more::Constructor;
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, From)]
-pub struct CityId(i64);
-
-impl CityId {
-    pub fn as_i64(self) -> i64 {
-        self.0
-    }
-}
-
-#[derive(Debug, Clone, From, FromStr, Constructor, PartialEq, PartialOrd, AsRef, Deref)]
-#[from(&str, String)]
-#[as_ref(str, String)]
-pub struct CityName(String);
-
-#[derive(Debug, Clone, From, FromStr, Constructor, PartialEq, PartialOrd, AsRef, Deref)]
-#[from(&str, String)]
-#[as_ref(str, String)]
-pub struct CityCountry(String);
-
-#[derive(Debug, Clone, Constructor)]
-pub struct City {
-    id: CityId,
-    name: CityName,
-    country: CityCountry,
-    lat: f64,
-    lon: f64,
-    parent: Option<CityId>,
-}
-
-impl City {
-    pub fn id(&self) -> &CityId {
-        &self.id
-    }
-    pub fn name(&self) -> &CityName {
-        &self.name
-    }
-    pub fn country(&self) -> &CityCountry {
-        &self.country
-    }
-    pub fn lat(&self) -> f64 {
-        self.lat
-    }
-    pub fn lon(&self) -> f64 {
-        self.lon
-    }
-    pub fn parent(&self) -> &Option<CityId> {
-        &self.parent
-    }
-}
+use crate::domain::CityId;
 
 #[derive(Debug, Clone, PartialEq, Constructor)]
 pub struct TripLeg {
@@ -62,63 +14,6 @@ pub struct TripLeg {
     destination: CityId,
     departure: usize,
     arrival: usize,
-}
-
-#[derive(Debug, Clone, Constructor)]
-pub struct Graph {
-    legs_by_city: HashMap<CityId, Vec<TripLeg>>,
-}
-
-#[cfg(test)]
-impl Graph {
-    pub fn legs_from(&self, station: CityId) -> &[TripLeg] {
-        self.legs_by_city
-            .get(&station)
-            .map(Vec::as_slice)
-            .unwrap_or_default()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct DestinationFilters {
-    max_connections: usize,
-    min_connection_duration: usize,
-    max_duration: usize,
-}
-
-impl DestinationFilters {
-    pub(crate) const MAX_CONNECTIONS_MIN: usize = 0;
-    pub(crate) const MAX_CONNECTIONS_MAX: usize = 2;
-    pub(crate) const MIN_CONNECTION_DURATION_MIN: usize = 0;
-    pub(crate) const MIN_CONNECTION_DURATION_MAX: usize = 3600 * 6;
-    pub(crate) const MAX_DURATION_MIN: usize = 3600;
-    pub(crate) const MAX_DURATION_MAX: usize = 3600 * 24;
-
-    pub fn new(
-        max_connections: usize,
-        min_connection_duration: usize,
-        max_duration: usize,
-    ) -> Self {
-        Self {
-            max_connections: max_connections
-                .clamp(Self::MAX_CONNECTIONS_MIN, Self::MAX_CONNECTIONS_MAX),
-            min_connection_duration: min_connection_duration.clamp(
-                Self::MIN_CONNECTION_DURATION_MIN,
-                Self::MIN_CONNECTION_DURATION_MAX,
-            ),
-            max_duration: max_duration.clamp(Self::MAX_DURATION_MIN, Self::MAX_DURATION_MAX),
-        }
-    }
-}
-
-impl Default for DestinationFilters {
-    fn default() -> Self {
-        Self {
-            max_connections: 2,
-            min_connection_duration: 900,
-            max_duration: 3600 * 24,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -154,7 +49,7 @@ impl Eq for Trip {}
 
 impl Trip {
     pub fn destination(&self) -> i64 {
-        self.destination.as_i64()
+        *self.destination
     }
 
     pub fn duration(&self) -> usize {
@@ -247,6 +142,63 @@ impl Trip {
     ) -> impl Iterator<Item = Self> + 'a {
         legs.iter()
             .filter_map(move |leg| self.try_connect_leg(leg, filters))
+    }
+}
+
+#[derive(Debug, Clone, Constructor)]
+pub struct Graph {
+    legs_by_city: HashMap<CityId, Vec<TripLeg>>,
+}
+
+#[cfg(test)]
+impl Graph {
+    pub fn legs_from(&self, station: CityId) -> &[TripLeg] {
+        self.legs_by_city
+            .get(&station)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DestinationFilters {
+    max_connections: usize,
+    min_connection_duration: usize,
+    max_duration: usize,
+}
+
+impl DestinationFilters {
+    pub(crate) const MAX_CONNECTIONS_MIN: usize = 0;
+    pub(crate) const MAX_CONNECTIONS_MAX: usize = 2;
+    pub(crate) const MIN_CONNECTION_DURATION_MIN: usize = 0;
+    pub(crate) const MIN_CONNECTION_DURATION_MAX: usize = 3600 * 6;
+    pub(crate) const MAX_DURATION_MIN: usize = 3600;
+    pub(crate) const MAX_DURATION_MAX: usize = 3600 * 24;
+
+    pub fn new(
+        max_connections: usize,
+        min_connection_duration: usize,
+        max_duration: usize,
+    ) -> Self {
+        Self {
+            max_connections: max_connections
+                .clamp(Self::MAX_CONNECTIONS_MIN, Self::MAX_CONNECTIONS_MAX),
+            min_connection_duration: min_connection_duration.clamp(
+                Self::MIN_CONNECTION_DURATION_MIN,
+                Self::MIN_CONNECTION_DURATION_MAX,
+            ),
+            max_duration: max_duration.clamp(Self::MAX_DURATION_MIN, Self::MAX_DURATION_MAX),
+        }
+    }
+}
+
+impl Default for DestinationFilters {
+    fn default() -> Self {
+        Self {
+            max_connections: 2,
+            min_connection_duration: 900,
+            max_duration: 3600 * 24,
+        }
     }
 }
 

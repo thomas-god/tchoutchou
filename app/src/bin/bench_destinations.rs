@@ -2,7 +2,7 @@ use std::{fs::OpenOptions, io::Write, time::Instant};
 
 use app::{
     app::schedule::ScheduleService,
-    domain::optim::CityId,
+    domain::CityId,
     infra::{
         caches::{InMemoryDestinationsCache, InMemoryGraphCache},
         repository::{geospatial::NominatimGeospatialRepository, sqlite::SqliteRepository},

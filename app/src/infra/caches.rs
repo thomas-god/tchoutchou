@@ -5,7 +5,10 @@ use std::{
 
 use crate::{
     app::schedule::{DestinationsCache, GraphCache},
-    domain::optim::{City, CityId, Graph, Trip},
+    domain::{
+        City, CityId,
+        destinations::{Graph, Trip},
+    },
 };
 
 /// In-memory, thread-safe [`GraphCache`] backed by a [`Mutex`]-protected [`HashMap`].
@@ -60,13 +63,13 @@ impl DestinationsCache for InMemoryDestinationsCache {
         self.inner
             .lock()
             .ok()?
-            .get(&(date.to_owned(), origin.as_i64()))
+            .get(&(date.to_owned(), **origin))
             .map(Arc::clone)
     }
 
     fn insert(&self, date: &str, origin: &CityId, result: Arc<(Vec<Trip>, Vec<City>)>) {
         if let Ok(mut map) = self.inner.lock() {
-            map.insert((date.to_owned(), origin.as_i64()), result);
+            map.insert((date.to_owned(), **origin), result);
         }
     }
 

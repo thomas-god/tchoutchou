@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     app::schedule::CityWithExtraInformation,
-    domain::optim::{City, CityId},
+    domain::{City, CityId},
     infra::http::AppState,
 };
 
@@ -29,7 +29,7 @@ impl From<City> for AutocompleteCityResponseItem {
     fn from(value: City) -> Self {
         Self {
             name: value.name().to_string(),
-            id: value.id().as_i64(),
+            id: **value.id(),
         }
     }
 }
@@ -81,7 +81,7 @@ pub struct CityResponseItem {
 impl From<City> for CityResponseItem {
     fn from(city: City) -> Self {
         Self {
-            id: city.id().as_i64(),
+            id: **city.id(),
             name: city.name().to_string(),
             country: city.country().to_string(),
             lat: city.lat(),
@@ -112,7 +112,7 @@ pub struct CityWithExtraInformationResponseItem {
 impl From<CityWithExtraInformation> for CityWithExtraInformationResponseItem {
     fn from(c: CityWithExtraInformation) -> Self {
         Self {
-            id: c.city.id().as_i64(),
+            id: **c.city.id(),
             name: c.city.name().to_string(),
             country: c.city.country().to_string(),
             lat: c.city.lat(),
@@ -162,11 +162,7 @@ pub async fn get_destinations(
             station_id: d.destination(),
             duration: d.duration(),
             connections: d.number_of_connections(),
-            visited_station_ids: d
-                .intermediary_city_ids()
-                .iter()
-                .map(|s| s.as_i64())
-                .collect(),
+            visited_station_ids: d.intermediary_city_ids().iter().map(|s| **s).collect(),
         })
         .collect();
 

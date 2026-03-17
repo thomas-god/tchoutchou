@@ -16,7 +16,7 @@ use crate::{
             ScheduleDataToImport,
         },
     },
-    domain::optim::{City, CityCountry, CityId, CityName},
+    domain::{City, CityCountry, CityId, CityName},
 };
 
 pub struct SqliteRepository {
@@ -339,7 +339,7 @@ impl SqliteRepository {
                 continue;
             };
 
-            let _ = insert_station_to_city.execute(params![station_id.value(), city_id.as_i64()]);
+            let _ = insert_station_to_city.execute(params![station_id.value(), *city_id]);
         }
     }
 }
@@ -474,7 +474,7 @@ impl ScheduleDataRepository for SqliteRepository {
             .conn
             .prepare(&query)
             .expect("cities_by_ids: prepare failed");
-        let params: Vec<i64> = ids.iter().map(|id| id.as_i64()).collect();
+        let params: Vec<i64> = ids.iter().map(|id| **id).collect();
 
         stmt.query_map(rusqlite::params_from_iter(params), |row| {
             let id: i64 = row.get(0)?;
@@ -1137,7 +1137,7 @@ mod test_sqlite {
         // Verify cities are returned in ID order
         assert_eq!(cities.len(), 2);
         for i in 1..cities.len() {
-            assert!(cities[i - 1].id().as_i64() <= cities[i].id().as_i64());
+            assert!(cities[i - 1].id() <= cities[i].id());
         }
     }
 
@@ -1363,10 +1363,10 @@ mod test_sqlite {
 
         let cities = repo.all_cities();
         assert_eq!(cities.len(), 1);
-        let city_id = cities[0].id().as_i64();
+        let city_id = cities[0].id();
 
         let metadata = repo
-            .get_city_metadata(city_id)
+            .get_city_metadata(**city_id)
             .expect("City metadata should exist");
         assert_eq!(metadata.0, Some("Q90".to_string()));
         assert_eq!(metadata.1, Some("fr:Paris".to_string()));
@@ -1398,10 +1398,10 @@ mod test_sqlite {
 
         let cities = repo.all_cities();
         assert_eq!(cities.len(), 1);
-        let city_id = cities[0].id().as_i64();
+        let city_id = cities[0].id();
 
         let metadata = repo
-            .get_city_metadata(city_id)
+            .get_city_metadata(**city_id)
             .expect("City metadata should exist");
         assert_eq!(metadata.0, None);
         assert_eq!(metadata.1, None);
@@ -1432,8 +1432,8 @@ mod test_sqlite {
         repo.import_timetable(data);
 
         let cities = repo.all_cities();
-        let city_id = cities[0].id().as_i64();
-        let metadata = repo.get_city_metadata(city_id).unwrap();
+        let city_id = cities[0].id();
+        let metadata = repo.get_city_metadata(**city_id).unwrap();
         assert_eq!(metadata.0, Some("Q456".to_string()));
         assert_eq!(metadata.1, None);
     }
@@ -1463,8 +1463,8 @@ mod test_sqlite {
         repo.import_timetable(data);
 
         let cities = repo.all_cities();
-        let city_id = cities[0].id().as_i64();
-        let metadata = repo.get_city_metadata(city_id).unwrap();
+        let city_id = cities[0].id();
+        let metadata = repo.get_city_metadata(**city_id).unwrap();
         assert_eq!(metadata.0, None);
         assert_eq!(metadata.1, Some("fr:Marseille".to_string()));
     }
@@ -1495,8 +1495,8 @@ mod test_sqlite {
         repo.import_timetable(first);
 
         let cities = repo.all_cities();
-        let city_id = cities[0].id().as_i64();
-        let metadata_before = repo.get_city_metadata(city_id).unwrap();
+        let city_id = cities[0].id();
+        let metadata_before = repo.get_city_metadata(**city_id).unwrap();
         assert_eq!(metadata_before.0, Some("Q90_old".to_string()));
         assert_eq!(metadata_before.1, Some("en:Paris_old".to_string()));
 
@@ -1527,8 +1527,8 @@ mod test_sqlite {
             1,
             "Should still have only one city after upsert"
         );
-        let city_id = cities[0].id().as_i64();
-        let metadata_after = repo.get_city_metadata(city_id).unwrap();
+        let city_id = cities[0].id();
+        let metadata_after = repo.get_city_metadata(**city_id).unwrap();
         assert_eq!(
             metadata_after.0,
             Some("Q90".to_string()),
@@ -1588,8 +1588,8 @@ mod test_sqlite {
         repo.import_timetable(second);
 
         let cities = repo.all_cities();
-        let city_id = cities[0].id().as_i64();
-        let metadata = repo.get_city_metadata(city_id).unwrap();
+        let city_id = cities[0].id();
+        let metadata = repo.get_city_metadata(**city_id).unwrap();
         assert_eq!(
             metadata.0, None,
             "Wikidata should be cleared on upsert with None"
@@ -1659,7 +1659,7 @@ mod test_sqlite {
         let repo = two_city_repo();
         let cities = repo.all_cities();
         for i in 1..cities.len() {
-            assert!(cities[i - 1].id().as_i64() <= cities[i].id().as_i64());
+            assert!(cities[i - 1].id() <= cities[i].id());
         }
     }
 
