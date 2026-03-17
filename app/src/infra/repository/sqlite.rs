@@ -11,12 +11,12 @@ use crate::{
         ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation, ImportedStationId,
         ImportedTripLeg,
         schedule::{
-            CityImportKey, CityInformation, CityWithExtraInformation, InternalStationId,
-            InternalTripLeg, ScheduleDataImportResult, ScheduleDataRepository,
-            ScheduleDataToImport,
+            AddLabelToCityError, CityImportKey, CityInformation, CityWithExtraInformation,
+            InternalStationId, InternalTripLeg, LabelCreationError, ScheduleDataImportResult,
+            ScheduleDataRepository, ScheduleDataToImport,
         },
     },
-    domain::{City, CityCountry, CityId, CityLabels, CityName},
+    domain::{City, CityCountry, CityId, CityLabelId, CityLabelName, CityLabels, CityName},
 };
 
 pub struct SqliteRepository {
@@ -97,6 +97,49 @@ impl SqliteRepository {
                 parent      INTEGER REFERENCES t_cities(id),
                 UNIQUE (import_key)
             );
+
+            CREATE TABLE IF NOT EXISTS t_city_labels (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL UNIQUE
+            );
+
+            CREATE TABLE IF NOT EXISTS t_city_to_label (
+                city_id     INTEGER REFERENCES t_cities(id) ON DELETE CASCADE,
+                label_id    INTEGER REFERENCES t_city_labels(id) ON DELETE CASCADE,
+                PRIMARY KEY (city_id, label_id)
+
+            );
+
+            CREATE VIEW IF NOT EXISTS v_cities_with_labels AS
+                WITH cities_with_label AS (
+                    SELECT
+                        t_cities.id,
+                        country,
+                        t_cities.name,
+                        lat,
+                        lon,
+                        wikidata,
+                        wikipedia,
+                        CASE WHEN
+                            t_city_labels.id IS NULL THEN NULL
+                            ELSE json_object('id', t_city_labels.id, 'name', t_city_labels.name)
+                        END AS label
+                    FROM t_cities
+                    LEFT JOIN t_city_to_label ON t_cities.id = t_city_to_label.city_id
+                    LEFT JOIN t_city_labels ON t_city_labels.id = t_city_to_label.label_id
+                )
+                SELECT
+                    id,
+                    country,
+                    name,
+                    lat,
+                    lon,
+                    wikidata,
+                    wikipedia,
+                    json_group_array(label) FILTER (WHERE label IS NOT NULL)
+                FROM cities_with_label
+                GROUP BY id, country, name, lat, lon, wikidata, wikipedia;
+
 
             CREATE TABLE IF NOT EXISTS t_stations (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -562,6 +605,60 @@ impl ScheduleDataRepository for SqliteRepository {
         .expect("all_cities_with_extra_information: query failed")
         .map(|r| r.expect("all_cities_with_extra_information: row mapping failed"))
         .collect()
+    }
+
+    fn create_label(&mut self, name: CityLabelName) -> Result<CityLabelId, LabelCreationError> {
+        self.conn
+            .prepare_cached("INSERT INTO t_city_labels (name) VALUES (?1) RETURNING id;")
+            .expect("create_label: prepare failed")
+            .query_row(params![AsRef::<str>::as_ref(&name)], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map(CityLabelId::from)
+            .map_err(|e| match e {
+                rusqlite::Error::SqliteFailure(err, _)
+                    if err.code == rusqlite::ErrorCode::ConstraintViolation =>
+                {
+                    LabelCreationError::LabelNameAlreadyExists
+                }
+                _ => panic!("create_label: unexpected error: {e}"),
+            })
+    }
+
+    fn add_label_to_city(
+        &mut self,
+        city: &CityId,
+        label: &CityLabelId,
+    ) -> Result<(), AddLabelToCityError> {
+        let city_exists = self
+            .conn
+            .prepare_cached("SELECT 1 FROM t_cities WHERE id = ?1")
+            .expect("add_label_to_city: prepare city check failed")
+            .exists(params![**city])
+            .expect("add_label_to_city: city check failed");
+        if !city_exists {
+            return Err(AddLabelToCityError::CityNotFound);
+        }
+
+        let label_exists = self
+            .conn
+            .prepare_cached("SELECT 1 FROM t_city_labels WHERE id = ?1")
+            .expect("add_label_to_city: prepare label check failed")
+            .exists(params![**label])
+            .expect("add_label_to_city: label check failed");
+        if !label_exists {
+            return Err(AddLabelToCityError::LabelNotFound);
+        }
+
+        self.conn
+            .prepare_cached(
+                "INSERT OR IGNORE INTO t_city_to_label (city_id, label_id) VALUES (?1, ?2);",
+            )
+            .expect("add_label_to_city: prepare failed")
+            .execute(params![**city, **label])
+            .expect("add_label_to_city: execute failed");
+
+        Ok(())
     }
 }
 
@@ -1806,5 +1903,89 @@ mod test_sqlite {
         assert_eq!(*results[0].name(), "Athens".into());
         assert_eq!(*results[1].name(), "Madrid".into());
         assert_eq!(*results[2].name(), "Zurich".into());
+    }
+
+    // ---- create_label ----
+
+    #[test]
+    fn create_label_returns_id() {
+        let mut repo = make_repo();
+        let id = repo.create_label("Capital".into());
+        assert!(id.is_ok());
+    }
+
+    #[test]
+    fn create_label_different_names_get_different_ids() {
+        let mut repo = make_repo();
+        let id1 = repo.create_label("Capital".into()).unwrap();
+        let id2 = repo.create_label("Hub".into()).unwrap();
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn create_label_duplicate_name_returns_error() {
+        let mut repo = make_repo();
+        repo.create_label("Capital".into()).unwrap();
+        let err = repo.create_label("Capital".into());
+        assert!(matches!(
+            err,
+            Err(LabelCreationError::LabelNameAlreadyExists)
+        ));
+    }
+
+    // ---- add_label_to_city ----
+
+    fn repo_with_city() -> (SqliteRepository, CityId) {
+        let mut repo = make_repo();
+        repo.import_timetable(data_to_import(
+            vec![station("A")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([(
+                ImportedStationId::from("A".to_string()),
+                CityInformation::new(
+                    "Paris".into(),
+                    "France".into(),
+                    48.8566,
+                    2.3522,
+                    "key-paris".into(),
+                    None,
+                    None,
+                ),
+            )]),
+        ));
+        let city_id = *repo.all_cities()[0].id();
+        (repo, city_id)
+    }
+
+    #[test]
+    fn add_label_to_city_succeeds() {
+        let (mut repo, city_id) = repo_with_city();
+        let label_id = repo.create_label("Capital".into()).unwrap();
+        assert!(repo.add_label_to_city(&city_id, &label_id).is_ok());
+    }
+
+    #[test]
+    fn add_label_to_city_is_idempotent() {
+        let (mut repo, city_id) = repo_with_city();
+        let label_id = repo.create_label("Capital".into()).unwrap();
+        repo.add_label_to_city(&city_id, &label_id).unwrap();
+        assert!(repo.add_label_to_city(&city_id, &label_id).is_ok());
+    }
+
+    #[test]
+    fn add_label_to_city_nonexistent_city_returns_error() {
+        let mut repo = make_repo();
+        let label_id = repo.create_label("Capital".into()).unwrap();
+        let err = repo.add_label_to_city(&CityId::from(9999), &label_id);
+        assert!(matches!(err, Err(AddLabelToCityError::CityNotFound)));
+    }
+
+    #[test]
+    fn add_label_to_city_nonexistent_label_returns_error() {
+        let (mut repo, city_id) = repo_with_city();
+        let err = repo.add_label_to_city(&city_id, &CityLabelId::from(9999));
+        assert!(matches!(err, Err(AddLabelToCityError::LabelNotFound)));
     }
 }
