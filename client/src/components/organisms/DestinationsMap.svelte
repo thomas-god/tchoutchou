@@ -22,17 +22,32 @@
 
 	let markersLayer = (leaflet as any).markerClusterGroup({
 		chunkedLoading: true,
-		disableClusteringAtZoom: 10,
+		disableClusteringAtZoom: 4,
 		spiderfyOnMaxZoom: false
 	});
 	let highlightLayer = leaflet.layerGroup();
 	let routeLayer = leaflet.layerGroup();
 	let previouslyHighlighted: any = undefined;
 
+	const updateMarkerSizes = () => {
+		const zoom = map.getZoom();
+		const radius = Math.max(3, Math.min(12, zoom - 3));
+
+		markers.forEach(({ marker }) => {
+			marker.setRadius(radius);
+		});
+
+		routeLayer.eachLayer((layer: any) => {
+			if (layer.setRadius) {
+				layer.setRadius(radius);
+			}
+		});
+	};
+
 	let markers = $derived(
 		destinations.map((destination) => {
 			const marker = leaflet
-				.circleMarker([destination.station.lat, destination.station.lon])
+				.circleMarker([destination.station.lat, destination.station.lon], { radius: 3 })
 				.on('click', () => {
 					if (onDestinationSelect) {
 						onDestinationSelect(destination);
@@ -122,6 +137,8 @@
 			map.addLayer(markersLayer);
 			map.addLayer(highlightLayer);
 		}
+
+		map.on('zoomend', updateMarkerSizes);
 
 		markersLayer.clearLayers();
 

@@ -51,7 +51,9 @@ export const autocompleteStation = query(
 	z.string(),
 	async (q: string): Promise<AutocompleteStation[]> => {
 		const url = getEnv('BACKEND_URL');
-		const res = await fetch(`${url}/api/stations/autocomplete?substring=${encodeURIComponent(q.trim())}`);
+		const res = await fetch(
+			`${url}/api/stations/autocomplete?substring=${encodeURIComponent(q.trim())}`
+		);
 		const data = await res.json();
 		return (data.stations ?? []) as AutocompleteStation[];
 	}
