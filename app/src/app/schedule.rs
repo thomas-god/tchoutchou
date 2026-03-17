@@ -12,7 +12,7 @@ use crate::{
         ImportedTripLeg, TrainDataToImport,
     },
     domain::{
-        City, CityCountry, CityId, CityLabelId, CityLabelName, CityName,
+        City, CityCountry, CityId, CityLabel, CityLabelId, CityLabelName, CityName,
         destinations::{DestinationFilters, Graph, Trip, TripLeg, find_trips},
     },
 };
@@ -168,6 +168,8 @@ pub trait ScheduleDataRepository {
 
     /// Return all cities in the system with extra metadata (wikidata, wikipedia).
     fn all_cities_with_extra_information(&self) -> Vec<CityWithExtraInformation>;
+
+    fn all_labels(&self) -> Vec<CityLabel>;
 
     fn create_label(&mut self, name: CityLabelName) -> Result<CityLabelId, LabelCreationError>;
 
@@ -387,6 +389,13 @@ impl<R: ScheduleDataRepository, GC: GraphCache, DC: DestinationsCache, GR: Geosp
         let _ = self.graph(date);
     }
 
+    pub fn all_labels(&self) -> Result<Vec<CityLabel>, ()> {
+        self.repository
+            .lock()
+            .map_err(|_| ())
+            .map(|repo| repo.all_labels())
+    }
+
     pub fn create_label(&self, name: CityLabelName) -> Result<CityLabelId, LabelCreationError> {
         self.repository
             .lock()
@@ -456,6 +465,7 @@ pub mod test_utils {
             fn cities_by_ids(&self, ids: &[CityId]) -> Vec<City>;
             fn all_cities(&self) -> Vec<City>;
             fn all_cities_with_extra_information(&self) -> Vec<CityWithExtraInformation>;
+            fn all_labels(&self) -> Vec<CityLabel>;
             fn create_label(&mut self, name: CityLabelName) -> Result<CityLabelId, LabelCreationError>;
             fn add_label_to_city(&mut self, city: &CityId, label: &CityLabelId) -> Result<(), AddLabelToCityError>;
         }

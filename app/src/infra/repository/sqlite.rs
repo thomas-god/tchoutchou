@@ -16,7 +16,9 @@ use crate::{
             ScheduleDataRepository, ScheduleDataToImport,
         },
     },
-    domain::{City, CityCountry, CityId, CityLabelId, CityLabelName, CityLabels, CityName},
+    domain::{
+        City, CityCountry, CityId, CityLabel, CityLabelId, CityLabelName, CityLabels, CityName,
+    },
 };
 
 pub struct SqliteRepository {
@@ -604,6 +606,22 @@ impl ScheduleDataRepository for SqliteRepository {
         })
         .expect("all_cities_with_extra_information: query failed")
         .map(|r| r.expect("all_cities_with_extra_information: row mapping failed"))
+        .collect()
+    }
+
+    fn all_labels(&self) -> Vec<CityLabel> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT id, name FROM t_city_labels ORDER BY name;")
+            .expect("all_labels: prepare failed");
+
+        stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let name: String = row.get(1)?;
+            Ok(CityLabel::new(CityLabelId::from(id), name.into()))
+        })
+        .expect("all_labels: query failed")
+        .map(|r| r.expect("all_labels: row mapping failed"))
         .collect()
     }
 

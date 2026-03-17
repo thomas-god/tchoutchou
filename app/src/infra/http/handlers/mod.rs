@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     app::schedule::{AddLabelToCityError, CityWithExtraInformation, LabelCreationError},
-    domain::{City, CityId, CityLabelId},
+    domain::{City, CityId, CityLabel, CityLabelId},
     infra::http::AppState,
 };
 
@@ -195,6 +195,38 @@ pub async fn create_label(
         Err(LabelCreationError::LabelNameAlreadyExists) => Err(StatusCode::CONFLICT),
         Err(LabelCreationError::RepositoryError) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
+}
+
+// --- list labels ---
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LabelResponseItem {
+    id: i64,
+    name: String,
+}
+
+impl From<CityLabel> for LabelResponseItem {
+    fn from(l: CityLabel) -> Self {
+        Self {
+            id: **l.id(),
+            name: l.name().to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LabelsResponse {
+    labels: Vec<LabelResponseItem>,
+}
+
+pub async fn get_labels(State(state): State<AppState>) -> Result<Json<LabelsResponse>, StatusCode> {
+    let labels = state
+        .schedule
+        .all_labels()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(LabelsResponse {
+        labels: labels.into_iter().map(LabelResponseItem::from).collect(),
+    }))
 }
 
 pub async fn add_label_to_city(
