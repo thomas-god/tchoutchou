@@ -5,7 +5,7 @@ use axum::{
         HeaderValue, Method,
         header::{CONTENT_TYPE, COOKIE, SET_COOKIE},
     },
-    routing::get,
+    routing::{get, post, put},
 };
 use tokio::net;
 use tower_http::cors::CorsLayer;
@@ -17,7 +17,9 @@ use crate::{
     infra::{
         caches::{InMemoryDestinationsCache, InMemoryGraphCache},
         config::Config,
-        http::handlers::{autocomplete_city, get_cities, get_destinations},
+        http::handlers::{
+            add_label_to_city, autocomplete_city, create_label, get_cities, get_destinations,
+        },
         repository::{geospatial::NominatimGeospatialRepository, sqlite::SqliteRepository},
     },
 };
@@ -96,4 +98,9 @@ fn routes() -> Router<AppState> {
         .route("/stations/autocomplete", get(autocomplete_city))
         .route("/destinations", get(get_destinations))
         .route("/cities", get(get_cities))
+        .route("/labels", post(create_label))
+        .route(
+            "/cities/{city_id}/labels/{label_id}",
+            put(add_label_to_city),
+        )
 }

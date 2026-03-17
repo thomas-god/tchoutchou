@@ -1,14 +1,14 @@
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    app::schedule::CityWithExtraInformation,
-    domain::{City, CityId},
+    app::schedule::{AddLabelToCityError, CityWithExtraInformation, LabelCreationError},
+    domain::{City, CityId, CityLabelId},
     infra::http::AppState,
 };
 
@@ -172,4 +172,43 @@ pub async fn get_destinations(
         destinations: items,
         cities: city_items,
     }))
+}
+
+// --- label management ---
+
+#[derive(Deserialize)]
+pub struct CreateLabelBody {
+    name: String,
+}
+
+#[derive(Serialize)]
+pub struct CreateLabelResponse {
+    id: i64,
+}
+
+pub async fn create_label(
+    State(state): State<AppState>,
+    Json(body): Json<CreateLabelBody>,
+) -> Result<(StatusCode, Json<CreateLabelResponse>), StatusCode> {
+    match state.schedule.create_label(body.name.into()) {
+        Ok(id) => Ok((StatusCode::CREATED, Json(CreateLabelResponse { id: *id }))),
+        Err(LabelCreationError::LabelNameAlreadyExists) => Err(StatusCode::CONFLICT),
+        Err(LabelCreationError::RepositoryError) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+pub async fn add_label_to_city(
+    State(state): State<AppState>,
+    Path((city_id, label_id)): Path<(i64, i64)>,
+) -> Result<StatusCode, StatusCode> {
+    match state
+        .schedule
+        .add_label_to_city(&CityId::from(city_id), &CityLabelId::from(label_id))
+    {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(AddLabelToCityError::CityNotFound) | Err(AddLabelToCityError::LabelNotFound) => {
+            Err(StatusCode::NOT_FOUND)
+        }
+        Err(AddLabelToCityError::RepositoryError) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
 }

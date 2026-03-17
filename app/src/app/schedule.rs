@@ -387,14 +387,15 @@ impl<R: ScheduleDataRepository, GC: GraphCache, DC: DestinationsCache, GR: Geosp
         let _ = self.graph(date);
     }
 
-    pub fn create_label(&mut self, name: CityLabelName) -> Result<CityLabelId, LabelCreationError> {
+    pub fn create_label(&self, name: CityLabelName) -> Result<CityLabelId, LabelCreationError> {
         self.repository
             .lock()
             .map_err(|_| LabelCreationError::RepositoryError)?
             .create_label(name)
     }
+
     pub fn add_label_to_city(
-        &mut self,
+        &self,
         city: &CityId,
         label: &CityLabelId,
     ) -> Result<(), AddLabelToCityError> {
