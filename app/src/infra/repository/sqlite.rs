@@ -5,6 +5,7 @@ use rusqlite::{
     Connection, Result, ToSql, Transaction, params,
     types::{ToSqlOutput, ValueRef},
 };
+use serde_json::Value;
 
 use crate::{
     app::{
@@ -59,6 +60,19 @@ impl ToSql for CityImportKey {
 }
 
 impl SqliteRepository {
+    fn parse_labels(json: String) -> CityLabels {
+        let values: Vec<Value> = serde_json::from_str(&json).unwrap_or_default();
+        let labels = values
+            .into_iter()
+            .filter_map(|v| {
+                let id = v["id"].as_i64()?;
+                let name = v["name"].as_str()?;
+                Some(CityLabel::new(CityLabelId::from(id), name.into()))
+            })
+            .collect();
+        CityLabels::new(labels)
+    }
+
     /// Open (or create) a SQLite database at the given file path.
     pub fn open(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
@@ -113,34 +127,22 @@ impl SqliteRepository {
             );
 
             CREATE VIEW IF NOT EXISTS v_cities_with_labels AS
-                WITH cities_with_label AS (
-                    SELECT
-                        t_cities.id,
-                        country,
-                        t_cities.name,
-                        lat,
-                        lon,
-                        wikidata,
-                        wikipedia,
-                        CASE WHEN
-                            t_city_labels.id IS NULL THEN NULL
-                            ELSE json_object('id', t_city_labels.id, 'name', t_city_labels.name)
-                        END AS label
-                    FROM t_cities
-                    LEFT JOIN t_city_to_label ON t_cities.id = t_city_to_label.city_id
-                    LEFT JOIN t_city_labels ON t_city_labels.id = t_city_to_label.label_id
-                )
                 SELECT
-                    id,
+                    t_cities.id,
                     country,
-                    name,
+                    t_cities.name,
                     lat,
                     lon,
+                    parent,
                     wikidata,
                     wikipedia,
-                    json_group_array(label) FILTER (WHERE label IS NOT NULL)
-                FROM cities_with_label
-                GROUP BY id, country, name, lat, lon, wikidata, wikipedia;
+                    json_group_array(
+                        json_object('id', t_city_labels.id, 'name', t_city_labels.name)
+                    ) FILTER (WHERE t_city_labels.id IS NOT NULL) AS labels
+                FROM t_cities
+                LEFT JOIN t_city_to_label ON t_cities.id = t_city_to_label.city_id
+                LEFT JOIN t_city_labels ON t_city_labels.id = t_city_to_label.label_id
+                GROUP BY t_cities.id, country, t_cities.name, lat, lon, parent, wikidata, wikipedia;
 
 
             CREATE TABLE IF NOT EXISTS t_stations (
@@ -459,7 +461,8 @@ impl ScheduleDataRepository for SqliteRepository {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, country, name, lat, lon, parent FROM t_cities
+                "SELECT id, country, name, lat, lon, parent, wikidata, wikipedia, labels
+                 FROM v_cities_with_labels
                  WHERE LOWER(name) LIKE LOWER(?1)
                  ORDER BY name
                  LIMIT ?2",
@@ -473,6 +476,7 @@ impl ScheduleDataRepository for SqliteRepository {
             let lat: f64 = row.get(3)?;
             let lon: f64 = row.get(4)?;
             let parent: Option<i64> = row.get(5)?;
+            let labels_json: String = row.get(8)?;
             Ok(City::new(
                 CityId::from(id),
                 name.into(),
@@ -480,7 +484,7 @@ impl ScheduleDataRepository for SqliteRepository {
                 lat,
                 lon,
                 parent.map(CityId::from),
-                CityLabels::empty(),
+                Self::parse_labels(labels_json),
             ))
         })
         .expect("search_cities_by_name: query failed")
@@ -512,7 +516,8 @@ impl ScheduleDataRepository for SqliteRepository {
 
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let query = format!(
-            "SELECT id, country, name, lat, lon, parent FROM t_cities WHERE id IN ({}) ORDER BY id",
+            "SELECT id, country, name, lat, lon, parent, wikidata, wikipedia, labels
+             FROM v_cities_with_labels WHERE id IN ({}) ORDER BY id",
             placeholders
         );
 
@@ -529,6 +534,7 @@ impl ScheduleDataRepository for SqliteRepository {
             let lat: f64 = row.get(3)?;
             let lon: f64 = row.get(4)?;
             let parent: Option<i64> = row.get(5)?;
+            let labels_json: String = row.get(8)?;
             Ok(City::new(
                 CityId::from(id),
                 name.into(),
@@ -536,7 +542,7 @@ impl ScheduleDataRepository for SqliteRepository {
                 lat,
                 lon,
                 parent.map(CityId::from),
-                CityLabels::empty(),
+                Self::parse_labels(labels_json),
             ))
         })
         .expect("cities_by_ids: query failed")
@@ -547,7 +553,10 @@ impl ScheduleDataRepository for SqliteRepository {
     fn all_cities(&self) -> Vec<City> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, country, name, lat, lon, parent FROM t_cities ORDER BY id")
+            .prepare(
+                "SELECT id, country, name, lat, lon, parent, wikidata, wikipedia, labels
+                FROM v_cities_with_labels ORDER BY id",
+            )
             .expect("all_cities: prepare failed");
 
         stmt.query_map([], |row| {
@@ -557,6 +566,7 @@ impl ScheduleDataRepository for SqliteRepository {
             let lat: f64 = row.get(3)?;
             let lon: f64 = row.get(4)?;
             let parent: Option<i64> = row.get(5)?;
+            let labels_json: String = row.get(8)?;
             Ok(City::new(
                 CityId::from(id),
                 name.into(),
@@ -564,7 +574,7 @@ impl ScheduleDataRepository for SqliteRepository {
                 lat,
                 lon,
                 parent.map(CityId::from),
-                CityLabels::empty(),
+                Self::parse_labels(labels_json),
             ))
         })
         .expect("all_cities: query failed")
@@ -576,8 +586,8 @@ impl ScheduleDataRepository for SqliteRepository {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, country, name, lat, lon, parent, wikidata, wikipedia \
-                 FROM t_cities ORDER BY id",
+                "SELECT id, country, name, lat, lon, parent, wikidata, wikipedia, labels
+                FROM v_cities_with_labels ORDER BY id",
             )
             .expect("all_cities_with_extra_information: prepare failed");
 
@@ -590,6 +600,7 @@ impl ScheduleDataRepository for SqliteRepository {
             let parent: Option<i64> = row.get(5)?;
             let wikidata: Option<String> = row.get(6)?;
             let wikipedia: Option<String> = row.get(7)?;
+            let labels_json: String = row.get(8)?;
             Ok(CityWithExtraInformation {
                 city: City::new(
                     CityId::from(id),
@@ -598,7 +609,7 @@ impl ScheduleDataRepository for SqliteRepository {
                     lat,
                     lon,
                     parent.map(CityId::from),
-                    CityLabels::empty(),
+                    Self::parse_labels(labels_json),
                 ),
                 wikidata,
                 wikipedia,
@@ -2005,5 +2016,112 @@ mod test_sqlite {
         let (mut repo, city_id) = repo_with_city();
         let err = repo.add_label_to_city(&city_id, &CityLabelId::from(9999));
         assert!(matches!(err, Err(AddLabelToCityError::LabelNotFound)));
+    }
+
+    // ---- labels returned on city queries ----
+
+    fn repo_with_labelled_paris() -> (SqliteRepository, CityId, CityLabelId) {
+        let mut repo = two_city_repo();
+        let cities = ScheduleDataRepository::all_cities(&repo);
+        let city_id = *cities
+            .iter()
+            .find(|c| *c.name() == "Paris".into())
+            .unwrap()
+            .id();
+        let label_id = repo.create_label("Capital".into()).unwrap();
+        repo.add_label_to_city(&city_id, &label_id).unwrap();
+        (repo, city_id, label_id)
+    }
+
+    #[test]
+    fn all_cities_returns_labels_for_labelled_city() {
+        let (repo, city_id, label_id) = repo_with_labelled_paris();
+        let cities = ScheduleDataRepository::all_cities(&repo);
+        let paris = cities.iter().find(|c| c.id() == &city_id).unwrap();
+        assert_eq!(
+            *paris.labels(),
+            CityLabels::new(vec![CityLabel::new(label_id, "Capital".into())])
+        );
+    }
+
+    #[test]
+    fn all_cities_returns_empty_labels_for_unlabelled_city() {
+        let (repo, city_id, _) = repo_with_labelled_paris();
+        let cities = ScheduleDataRepository::all_cities(&repo);
+        let london = cities.iter().find(|c| c.id() != &city_id).unwrap();
+        assert_eq!(*london.labels(), CityLabels::empty());
+    }
+
+    #[test]
+    fn all_cities_city_with_multiple_labels_returns_all() {
+        let (mut repo, city_id, _) = repo_with_labelled_paris();
+        let label2_id = repo.create_label("Hub".into()).unwrap();
+        repo.add_label_to_city(&city_id, &label2_id).unwrap();
+
+        let cities = ScheduleDataRepository::all_cities(&repo);
+        let paris = cities.iter().find(|c| c.id() == &city_id).unwrap();
+        let label_names: Vec<&str> = paris.labels().iter().map(|l| l.name().as_ref()).collect();
+        assert_eq!(label_names.len(), 2);
+        assert!(label_names.contains(&"Capital"));
+        assert!(label_names.contains(&"Hub"));
+    }
+
+    #[test]
+    fn search_cities_by_name_returns_labels() {
+        let (repo, _, label_id) = repo_with_labelled_paris();
+        let results = repo.search_cities_by_name("Paris", 10);
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            *results[0].labels(),
+            CityLabels::new(vec![CityLabel::new(label_id, "Capital".into())])
+        );
+    }
+
+    #[test]
+    fn search_cities_by_name_returns_empty_labels_for_unlabelled_city() {
+        let (repo, _, _) = repo_with_labelled_paris();
+        let results = repo.search_cities_by_name("London", 10);
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].labels(), CityLabels::empty());
+    }
+
+    #[test]
+    fn cities_by_ids_returns_labels() {
+        let (repo, city_id, label_id) = repo_with_labelled_paris();
+        let cities = repo.cities_by_ids(&[city_id]);
+        assert_eq!(cities.len(), 1);
+        assert_eq!(
+            *cities[0].labels(),
+            CityLabels::new(vec![CityLabel::new(label_id, "Capital".into())])
+        );
+    }
+
+    #[test]
+    fn cities_by_ids_returns_empty_labels_for_unlabelled_city() {
+        let (repo, city_id, _) = repo_with_labelled_paris();
+        let all = ScheduleDataRepository::all_cities(&repo);
+        let london_id = *all.iter().find(|c| c.id() != &city_id).unwrap().id();
+        let cities = repo.cities_by_ids(&[london_id]);
+        assert_eq!(cities.len(), 1);
+        assert_eq!(*cities[0].labels(), CityLabels::empty());
+    }
+
+    #[test]
+    fn all_cities_with_extra_information_returns_labels() {
+        let (repo, city_id, label_id) = repo_with_labelled_paris();
+        let cities = repo.all_cities_with_extra_information();
+        let paris = cities.iter().find(|c| c.city.id() == &city_id).unwrap();
+        assert_eq!(
+            *paris.city.labels(),
+            CityLabels::new(vec![CityLabel::new(label_id, "Capital".into())])
+        );
+    }
+
+    #[test]
+    fn all_cities_with_extra_information_returns_empty_labels_for_unlabelled_city() {
+        let (repo, city_id, _) = repo_with_labelled_paris();
+        let cities = repo.all_cities_with_extra_information();
+        let london = cities.iter().find(|c| c.city.id() != &city_id).unwrap();
+        assert_eq!(*london.city.labels(), CityLabels::empty());
     }
 }

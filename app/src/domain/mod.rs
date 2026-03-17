@@ -23,7 +23,7 @@ pub struct CityLabelId(i64);
 #[as_ref(str, String)]
 pub struct CityLabelName(String);
 
-#[derive(Debug, Clone, Constructor)]
+#[derive(Debug, Clone, Constructor, PartialEq)]
 pub struct CityLabel {
     id: CityLabelId,
     name: CityLabelName,
@@ -38,12 +38,16 @@ impl CityLabel {
     }
 }
 
-#[derive(Debug, Clone, Constructor, Default)]
+#[derive(Debug, Clone, Constructor, Default, PartialEq)]
 pub struct CityLabels(Vec<CityLabel>);
 
 impl CityLabels {
     pub fn empty() -> CityLabels {
         Self(vec![])
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &CityLabel> {
+        self.0.iter()
     }
 }
 
