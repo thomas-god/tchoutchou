@@ -26,6 +26,7 @@
 	}
 
 	let mapElement: HTMLDivElement;
+	let tableContainer: HTMLDivElement;
 	let map: any = $state(undefined);
 	let citiesLayer: LayerGroup<CircleMarker> = leaflet.layerGroup();
 	let highlightMarker: any;
@@ -69,6 +70,9 @@
 					radius
 				})
 				.bindTooltip(city.name, { permanent: false })
+				.on('click', () => {
+					selectedCity = city;
+				})
 				.addTo(citiesLayer);
 		}
 	});
@@ -92,6 +96,17 @@
 		}
 		highlightMarker.bindPopup(city.name).openPopup();
 		map.flyTo([city.lat, city.lon], 10, { duration: 0.8 });
+
+		const row = tableContainer?.querySelector(`[data-city-id="${city.id}"]`) as HTMLElement | null;
+		if (row && tableContainer) {
+			const containerRect = tableContainer.getBoundingClientRect();
+			const rowRect = row.getBoundingClientRect();
+			const absoluteRowTop = rowRect.top - containerRect.top + tableContainer.scrollTop;
+			tableContainer.scrollTo({
+				top: absoluteRowTop - tableContainer.clientHeight / 2 + row.offsetHeight / 2,
+				behavior: 'smooth'
+			});
+		}
 	});
 </script>
 
@@ -116,7 +131,7 @@
 					{/if}
 				</p>
 			</div>
-			<div class="overflow-auto">
+			<div class="overflow-auto" bind:this={tableContainer}>
 				<table class="table table-zebra">
 					<thead>
 						<tr>
@@ -130,7 +145,11 @@
 					</thead>
 					<tbody>
 						{#each filtered as city (city.id)}
-							<tr class="hover:bg-base-300">
+							<tr
+								class="hover:bg-base-300"
+								class:row-highlight={selectedCity?.id === city.id}
+								data-city-id={city.id}
+							>
 								<td>{city.id}</td>
 								<td>{city.name}</td>
 								<td>{city.country}</td>
@@ -180,3 +199,19 @@
 	<!-- Right: map -->
 	<div class="w-1/2 overflow-hidden rounded-lg" bind:this={mapElement}></div>
 </div>
+
+<style>
+	@keyframes row-flash {
+		0%,
+		100% {
+			box-shadow: inset 0 0 0 9999px transparent;
+		}
+		30% {
+			box-shadow: inset 0 0 0 9999px oklch(80% 0.15 80 / 0.45);
+		}
+	}
+
+	.row-highlight {
+		animation: row-flash 1.4s ease-out;
+	}
+</style>
