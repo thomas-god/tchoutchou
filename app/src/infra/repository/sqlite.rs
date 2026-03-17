@@ -308,8 +308,6 @@ impl SqliteRepository {
                 "INSERT INTO t_cities (import_key, country, name, lat, lon, wikidata, wikipedia)
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                 ON CONFLICT (import_key) DO UPDATE SET
-                    name = excluded.name,
-                    country = excluded.country,
                     lat = excluded.lat,
                     lon = excluded.lon,
                     wikidata = excluded.wikidata,
@@ -1151,9 +1149,9 @@ mod test_sqlite {
     }
 
     #[test]
-    fn test_reimport_same_import_key_updates_city_metadata() {
-        // A second import with the same import_key should upsert (update) the
-        // existing city row rather than create a duplicate.
+    fn test_reimport_same_import_key_updates_city_metadata_but_name() {
+        // A second import with the same import_key should update the
+        // existing city row metadata rather than create a duplicate.
         let mut repo = make_repo();
 
         let first = data_to_import(
@@ -1184,7 +1182,7 @@ mod test_sqlite {
             HashMap::from([(
                 ImportedStationId::from("A".to_string()),
                 CityInformation::new(
-                    "Paris".into(),
+                    "New name".into(),
                     "France".into(),
                     48.8566,
                     2.3522,
@@ -1204,8 +1202,8 @@ mod test_sqlite {
         );
         assert_eq!(
             *cities[0].name(),
-            "Paris".into(),
-            "City name should be updated on reimport"
+            "Old Name".into(),
+            "City name should not be updated on reimport"
         );
         assert_eq!(cities[0].lat(), 48.8566);
     }
@@ -1270,62 +1268,6 @@ mod test_sqlite {
         assert_eq!(
             city_for_x, city_for_y,
             "Stations from different sources with the same import_key should map to the same city"
-        );
-    }
-
-    #[test]
-    fn test_search_cities_by_name_after_upsert_finds_updated_name() {
-        let mut repo = make_repo();
-
-        let first = data_to_import(
-            vec![station("A")],
-            vec![schedule("S1", &["20260101"])],
-            vec![],
-            "source",
-            HashMap::from([(
-                ImportedStationId::from("A".to_string()),
-                CityInformation::new(
-                    "Old Name".into(),
-                    "France".into(),
-                    1.0,
-                    2.0,
-                    "key-paris".into(),
-                    Some("wikidata".to_string()),
-                    Some("wikipedia".to_string()),
-                ),
-            )]),
-        );
-        repo.import_timetable(first);
-
-        let second = data_to_import(
-            vec![station("A")],
-            vec![schedule("S1", &["20260101"])],
-            vec![],
-            "source",
-            HashMap::from([(
-                ImportedStationId::from("A".to_string()),
-                CityInformation::new(
-                    "Paris".into(),
-                    "France".into(),
-                    48.8566,
-                    2.3522,
-                    "key-paris".into(),
-                    Some("wikidata".to_string()),
-                    Some("wikipedia".to_string()),
-                ),
-            )]),
-        );
-        repo.import_timetable(second);
-
-        let results = repo.search_cities_by_name("Paris", 10);
-        assert_eq!(results.len(), 1);
-        assert_eq!(*results[0].name(), "Paris".into());
-
-        let old_results = repo.search_cities_by_name("Old Name", 10);
-        assert_eq!(
-            old_results.len(),
-            0,
-            "Old name should no longer be findable after upsert"
         );
     }
 
