@@ -495,6 +495,33 @@ impl ScheduleDataRepository for SqliteRepository {
         .map(|r| r.expect("cities_by_ids: row mapping failed"))
         .collect()
     }
+
+    fn all_cities(&self) -> Vec<City> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, country, name, lat, lon, parent FROM t_cities ORDER BY id")
+            .expect("all_cities: prepare failed");
+
+        stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let country: String = row.get(1)?;
+            let name: String = row.get(2)?;
+            let lat: f64 = row.get(3)?;
+            let lon: f64 = row.get(4)?;
+            let parent: Option<i64> = row.get(5)?;
+            Ok(City::new(
+                CityId::from(id),
+                name.into(),
+                country.into(),
+                lat,
+                lon,
+                parent.map(CityId::from),
+            ))
+        })
+        .expect("all_cities: query failed")
+        .map(|r| r.expect("all_cities: row mapping failed"))
+        .collect()
+    }
 }
 
 #[cfg(test)]
@@ -1534,5 +1561,208 @@ mod test_sqlite {
             metadata.1, None,
             "Wikipedia should be cleared on upsert with None"
         );
+    }
+
+    // ---- all_cities ----
+
+    fn two_city_repo() -> SqliteRepository {
+        let mut repo = make_repo();
+        repo.import_timetable(data_to_import(
+            vec![station("A"), station("B")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([
+                (
+                    ImportedStationId::from("A".to_string()),
+                    CityInformation::new(
+                        "Paris".into(),
+                        "France".into(),
+                        48.8566,
+                        2.3522,
+                        "key-paris".into(),
+                        None,
+                        None,
+                    ),
+                ),
+                (
+                    ImportedStationId::from("B".to_string()),
+                    CityInformation::new(
+                        "London".into(),
+                        "UK".into(),
+                        51.5074,
+                        -0.1278,
+                        "key-london".into(),
+                        None,
+                        None,
+                    ),
+                ),
+            ]),
+        ));
+        repo
+    }
+
+    #[test]
+    fn all_cities_returns_empty_when_no_data() {
+        let repo = make_repo();
+        assert!(repo.all_cities().is_empty());
+    }
+
+    #[test]
+    fn all_cities_returns_all_cities() {
+        let repo = two_city_repo();
+        let cities = repo.all_cities();
+        assert_eq!(cities.len(), 2);
+        assert!(cities.iter().any(|c| *c.name() == "Paris".into()));
+        assert!(cities.iter().any(|c| *c.name() == "London".into()));
+    }
+
+    #[test]
+    fn all_cities_returns_cities_ordered_by_id() {
+        let repo = two_city_repo();
+        let cities = repo.all_cities();
+        for i in 1..cities.len() {
+            assert!(cities[i - 1].id().as_i64() <= cities[i].id().as_i64());
+        }
+    }
+
+    // ---- search_cities_by_name ----
+
+    #[test]
+    fn search_cities_by_name_returns_empty_when_no_match() {
+        let repo = two_city_repo();
+        let results = repo.search_cities_by_name("Berlin", 10);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn search_cities_by_name_matches_exact_name() {
+        let repo = two_city_repo();
+        let results = repo.search_cities_by_name("Paris", 10);
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].name(), "Paris".into());
+    }
+
+    #[test]
+    fn search_cities_by_name_is_case_insensitive() {
+        let repo = two_city_repo();
+        let results = repo.search_cities_by_name("paris", 10);
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].name(), "Paris".into());
+    }
+
+    #[test]
+    fn search_cities_by_name_matches_partial_name() {
+        let repo = two_city_repo();
+        let results = repo.search_cities_by_name("ari", 10);
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].name(), "Paris".into());
+    }
+
+    #[test]
+    fn search_cities_by_name_respects_limit() {
+        let mut repo = make_repo();
+        repo.import_timetable(data_to_import(
+            vec![station("A"), station("B"), station("C")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([
+                (
+                    ImportedStationId::from("A".to_string()),
+                    CityInformation::new(
+                        "Amsterdam".into(),
+                        "NL".into(),
+                        52.37,
+                        4.9,
+                        "key-ams".into(),
+                        None,
+                        None,
+                    ),
+                ),
+                (
+                    ImportedStationId::from("B".to_string()),
+                    CityInformation::new(
+                        "Antwerp".into(),
+                        "BE".into(),
+                        51.22,
+                        4.4,
+                        "key-ant".into(),
+                        None,
+                        None,
+                    ),
+                ),
+                (
+                    ImportedStationId::from("C".to_string()),
+                    CityInformation::new(
+                        "Alicante".into(),
+                        "ES".into(),
+                        38.35,
+                        -0.48,
+                        "key-ali".into(),
+                        None,
+                        None,
+                    ),
+                ),
+            ]),
+        ));
+
+        let results = repo.search_cities_by_name("a", 2);
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn search_cities_by_name_returns_results_ordered_alphabetically() {
+        let mut repo = make_repo();
+        repo.import_timetable(data_to_import(
+            vec![station("A"), station("B"), station("C")],
+            vec![schedule("S1", &["20260101"])],
+            vec![],
+            "source",
+            HashMap::from([
+                (
+                    ImportedStationId::from("A".to_string()),
+                    CityInformation::new(
+                        "Zurich".into(),
+                        "CH".into(),
+                        47.37,
+                        8.54,
+                        "key-zur".into(),
+                        None,
+                        None,
+                    ),
+                ),
+                (
+                    ImportedStationId::from("B".to_string()),
+                    CityInformation::new(
+                        "Athens".into(),
+                        "GR".into(),
+                        37.98,
+                        23.73,
+                        "key-ath".into(),
+                        None,
+                        None,
+                    ),
+                ),
+                (
+                    ImportedStationId::from("C".to_string()),
+                    CityInformation::new(
+                        "Madrid".into(),
+                        "ES".into(),
+                        40.42,
+                        -3.7,
+                        "key-mad".into(),
+                        None,
+                        None,
+                    ),
+                ),
+            ]),
+        ));
+
+        let results = repo.search_cities_by_name("", 10);
+        assert_eq!(results.len(), 3);
+        assert_eq!(*results[0].name(), "Athens".into());
+        assert_eq!(*results[1].name(), "Madrid".into());
+        assert_eq!(*results[2].name(), "Zurich".into());
     }
 }

@@ -148,6 +148,9 @@ pub trait ScheduleDataRepository {
 
     /// Return City objects for the given city IDs.
     fn cities_by_ids(&self, ids: &[CityId]) -> Vec<City>;
+
+    /// Return all cities in the system.
+    fn all_cities(&self) -> Vec<City>;
 }
 
 pub trait GraphCache: Send + Sync {
@@ -264,6 +267,14 @@ impl<R: ScheduleDataRepository, GC: GraphCache, DC: DestinationsCache, GR: Geosp
             .lock()
             .map_err(|_| ())
             .map(|repo| repo.search_cities_by_name(query, limit))
+    }
+
+    /// Return all cities in the system.
+    pub fn all_cities(&self) -> Result<Vec<City>, ()> {
+        self.repository
+            .lock()
+            .map_err(|_| ())
+            .map(|repo| repo.all_cities())
     }
 
     pub fn find_destinations(
@@ -385,6 +396,7 @@ pub mod test_utils {
             fn stations_to_city(&self) -> HashMap<InternalStationId, CityId>;
             fn search_cities_by_name(&self, query: &str, limit: usize) -> Vec<City>;
             fn cities_by_ids(&self, ids: &[CityId]) -> Vec<City>;
+            fn all_cities(&self) -> Vec<City>;
         }
     }
 
@@ -766,6 +778,46 @@ mod tests {
         let _ = service.find_destinations(TEST_DATE, &cid(2));
         // Third call reuses the cached result for origin 1 — no extra repository hit.
         let _ = service.find_destinations(TEST_DATE, &cid(1));
+    }
+
+    // ---- all_cities ----
+
+    #[test]
+    fn all_cities_returns_all_cities_from_repository() {
+        let paris = City::new(
+            cid(1),
+            "Paris".into(),
+            "France".into(),
+            48.8566,
+            2.3522,
+            None,
+        );
+        let london = City::new(cid(2), "London".into(), "UK".into(), 51.5074, -0.1278, None);
+
+        let mut mock = MockScheduleDataRepository::new();
+        mock.expect_all_cities()
+            .times(1)
+            .returning(move || vec![paris.clone(), london.clone()]);
+        let geo = MockGeospatialRepository::new();
+
+        let service = make_service(mock, geo);
+        let cities = service.all_cities().expect("all_cities should succeed");
+
+        assert_eq!(cities.len(), 2);
+        assert!(cities.iter().any(|c| *c.name() == "Paris".into()));
+        assert!(cities.iter().any(|c| *c.name() == "London".into()));
+    }
+
+    #[test]
+    fn all_cities_returns_empty_when_no_cities() {
+        let mut mock = MockScheduleDataRepository::new();
+        mock.expect_all_cities().times(1).returning(|| vec![]);
+        let geo = MockGeospatialRepository::new();
+
+        let service = make_service(mock, geo);
+        let cities = service.all_cities().expect("all_cities should succeed");
+
+        assert!(cities.is_empty());
     }
 
     #[tokio::test]
