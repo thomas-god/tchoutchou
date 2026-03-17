@@ -96,6 +96,21 @@ pub struct DestinationsResponse {
     cities: Vec<CityResponseItem>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct LabelResponseItem {
+    id: i64,
+    name: String,
+}
+
+impl From<CityLabel> for LabelResponseItem {
+    fn from(l: CityLabel) -> Self {
+        Self {
+            id: **l.id(),
+            name: l.name().to_string(),
+        }
+    }
+}
+
 // --- all cities ---
 
 #[derive(Debug, Clone, Serialize)]
@@ -107,6 +122,7 @@ pub struct CityWithExtraInformationResponseItem {
     lon: f64,
     wikidata: Option<String>,
     wikipedia: Option<String>,
+    labels: Vec<LabelResponseItem>,
 }
 
 impl From<CityWithExtraInformation> for CityWithExtraInformationResponseItem {
@@ -119,6 +135,13 @@ impl From<CityWithExtraInformation> for CityWithExtraInformationResponseItem {
             lon: c.city.lon(),
             wikidata: c.wikidata,
             wikipedia: c.wikipedia,
+            labels: c
+                .city
+                .labels()
+                .iter()
+                .cloned()
+                .map(LabelResponseItem::from)
+                .collect(),
         }
     }
 }
@@ -198,21 +221,6 @@ pub async fn create_label(
 }
 
 // --- list labels ---
-
-#[derive(Debug, Clone, Serialize)]
-pub struct LabelResponseItem {
-    id: i64,
-    name: String,
-}
-
-impl From<CityLabel> for LabelResponseItem {
-    fn from(l: CityLabel) -> Self {
-        Self {
-            id: **l.id(),
-            name: l.name().to_string(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LabelsResponse {

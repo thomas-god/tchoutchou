@@ -2,6 +2,11 @@ import { getEnv } from '$lib/env';
 import { query } from '$app/server';
 import z from 'zod';
 
+const labelSchema = z.object({
+	id: z.number(),
+	name: z.string()
+});
+
 const cityWithExtraInformationSchema = z.object({
 	id: z.number(),
 	name: z.string(),
@@ -9,10 +14,12 @@ const cityWithExtraInformationSchema = z.object({
 	lat: z.number(),
 	lon: z.number(),
 	wikidata: z.string().nullable(),
-	wikipedia: z.string().nullable()
+	wikipedia: z.string().nullable(),
+	labels: z.array(labelSchema)
 });
 
 export type CityWithExtraInformation = z.infer<typeof cityWithExtraInformationSchema>;
+export type CityLabel = z.infer<typeof labelSchema>;
 
 const citiesResponseSchema = z.object({
 	cities: z.array(cityWithExtraInformationSchema)

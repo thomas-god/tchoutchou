@@ -139,6 +139,7 @@
 							<th>Name</th>
 							<th>Country</th>
 							<th>Coordinates</th>
+							<th>Labels</th>
 							<th>Wikidata</th>
 							<th>Wikipedia</th>
 						</tr>
@@ -165,6 +166,13 @@
 										>
 											📍
 										</button>
+									</div>
+								</td>
+								<td>
+									<div class="flex flex-wrap gap-1">
+										{#each city.labels as label (label.id)}
+											<span class="badge badge-outline badge-sm">{label.name}</span>
+										{/each}
 									</div>
 								</td>
 								<td>
