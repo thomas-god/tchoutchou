@@ -16,7 +16,7 @@ use crate::{
             ScheduleDataToImport,
         },
     },
-    domain::{City, CityCountry, CityId, CityName},
+    domain::{City, CityCountry, CityId, CityLabels, CityName},
 };
 
 pub struct SqliteRepository {
@@ -435,6 +435,7 @@ impl ScheduleDataRepository for SqliteRepository {
                 lat,
                 lon,
                 parent.map(CityId::from),
+                CityLabels::empty(),
             ))
         })
         .expect("search_cities_by_name: query failed")
@@ -490,6 +491,7 @@ impl ScheduleDataRepository for SqliteRepository {
                 lat,
                 lon,
                 parent.map(CityId::from),
+                CityLabels::empty(),
             ))
         })
         .expect("cities_by_ids: query failed")
@@ -517,6 +519,7 @@ impl ScheduleDataRepository for SqliteRepository {
                 lat,
                 lon,
                 parent.map(CityId::from),
+                CityLabels::empty(),
             ))
         })
         .expect("all_cities: query failed")
@@ -550,6 +553,7 @@ impl ScheduleDataRepository for SqliteRepository {
                     lat,
                     lon,
                     parent.map(CityId::from),
+                    CityLabels::empty(),
                 ),
                 wikidata,
                 wikipedia,
@@ -629,6 +633,7 @@ impl SqliteRepository {
                 lat,
                 lon,
                 parent.map(CityId::from),
+                CityLabels::empty(),
             ))
         })
         .expect("all_cities: query failed")

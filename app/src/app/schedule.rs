@@ -456,8 +456,11 @@ pub mod test_utils {
 #[cfg(test)]
 mod tests {
 
-    use crate::app::schedule::test_utils::{
-        MockGeospatialRepository, MockScheduleDataRepository, make_service,
+    use crate::{
+        app::schedule::test_utils::{
+            MockGeospatialRepository, MockScheduleDataRepository, make_service,
+        },
+        domain::CityLabels,
     };
 
     use super::*;
@@ -635,8 +638,17 @@ mod tests {
             48.8566,
             2.3522,
             None,
+            CityLabels::empty(),
         );
-        let london = City::new(cid(2), "London".into(), "UK".into(), 51.5074, -0.1278, None);
+        let london = City::new(
+            cid(2),
+            "London".into(),
+            "UK".into(),
+            51.5074,
+            -0.1278,
+            None,
+            CityLabels::empty(),
+        );
         let berlin = City::new(
             cid(3),
             "Berlin".into(),
@@ -644,6 +656,7 @@ mod tests {
             52.5200,
             13.4050,
             None,
+            CityLabels::empty(),
         );
 
         let mut mock = MockScheduleDataRepository::new();
@@ -683,8 +696,17 @@ mod tests {
             48.8566,
             2.3522,
             None,
+            CityLabels::empty(),
         );
-        let london = City::new(cid(2), "London".into(), "UK".into(), 51.5074, -0.1278, None);
+        let london = City::new(
+            cid(2),
+            "London".into(),
+            "UK".into(),
+            51.5074,
+            -0.1278,
+            None,
+            CityLabels::empty(),
+        );
 
         let mut mock = MockScheduleDataRepository::new();
         mock.expect_legs_for_date()
@@ -811,8 +833,17 @@ mod tests {
             48.8566,
             2.3522,
             None,
+            CityLabels::empty(),
         );
-        let london = City::new(cid(2), "London".into(), "UK".into(), 51.5074, -0.1278, None);
+        let london = City::new(
+            cid(2),
+            "London".into(),
+            "UK".into(),
+            51.5074,
+            -0.1278,
+            None,
+            CityLabels::empty(),
+        );
 
         let mut mock = MockScheduleDataRepository::new();
         mock.expect_all_cities()
@@ -844,7 +875,15 @@ mod tests {
     async fn ingest_invalidates_destinations_cache() {
         let trips = vec![InternalTripLeg::new(siid(1), siid(2), 100, 200)];
         let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2))]);
-        let city = City::new(cid(2), "London".into(), "UK".into(), 51.5, -0.1, None);
+        let city = City::new(
+            cid(2),
+            "London".into(),
+            "UK".into(),
+            51.5,
+            -0.1,
+            None,
+            CityLabels::empty(),
+        );
 
         let mut mock = MockScheduleDataRepository::new();
         mock.expect_import_timetable()

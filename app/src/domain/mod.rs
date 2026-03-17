@@ -15,6 +15,38 @@ pub struct CityName(String);
 #[as_ref(str, String)]
 pub struct CityCountry(String);
 
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, From, Deref)]
+pub struct CityLabelId(i64);
+
+#[derive(Debug, Clone, From, FromStr, Constructor, PartialEq, PartialOrd, AsRef, Deref)]
+#[from(&str, String)]
+#[as_ref(str, String)]
+pub struct CityLabelName(String);
+
+#[derive(Debug, Clone, Constructor)]
+pub struct CityLabel {
+    id: CityLabelId,
+    name: CityLabelName,
+}
+
+impl CityLabel {
+    pub fn id(&self) -> &CityLabelId {
+        &self.id
+    }
+    pub fn name(&self) -> &CityLabelName {
+        &self.name
+    }
+}
+
+#[derive(Debug, Clone, Constructor, Default)]
+pub struct CityLabels(Vec<CityLabel>);
+
+impl CityLabels {
+    pub fn empty() -> CityLabels {
+        Self(vec![])
+    }
+}
+
 #[derive(Debug, Clone, Constructor)]
 pub struct City {
     id: CityId,
@@ -23,6 +55,7 @@ pub struct City {
     lat: f64,
     lon: f64,
     parent: Option<CityId>,
+    labels: CityLabels,
 }
 
 impl City {
@@ -43,5 +76,8 @@ impl City {
     }
     pub fn parent(&self) -> &Option<CityId> {
         &self.parent
+    }
+    pub fn labels(&self) -> &CityLabels {
+        &self.labels
     }
 }
