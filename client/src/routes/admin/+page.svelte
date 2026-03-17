@@ -1,5 +1,20 @@
 <script lang="ts">
 	import { fetchCities } from '$lib/remote/cities.remote';
+
+	let query = $state('');
+
+	function fuzzyMatch(text: string, pattern: string): boolean {
+		if (!pattern) return true;
+		const t = text.toLowerCase();
+		const p = pattern.toLowerCase();
+		let ti = 0;
+		for (let pi = 0; pi < p.length; pi++) {
+			while (ti < t.length && t[ti] !== p[pi]) ti++;
+			if (ti === t.length) return false;
+			ti++;
+		}
+		return true;
+	}
 </script>
 
 <h1 class="text-2xl">Cities</h1>
@@ -7,7 +22,18 @@
 {#await fetchCities(undefined)}
 	<p class="loading loading-dots">Loading…</p>
 {:then cities}
-	<p class="italic">{cities.length} cities</p>
+	{@const filtered = cities.filter(
+		(c) => fuzzyMatch(c.name, query) || fuzzyMatch(c.country, query)
+	)}
+	<div class="m-2 flex items-center gap-4">
+		<input
+			class="input-bordered input w-full max-w-sm"
+			type="search"
+			placeholder="Search cities…"
+			bind:value={query}
+		/>
+		<p class="italic">{filtered.length} / {cities.length} cities</p>
+	</div>
 	<div class="overflow-x-auto">
 		<table class="table table-zebra">
 			<thead>
@@ -22,7 +48,7 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#each cities as city (city.id)}
+				{#each filtered as city (city.id)}
 					<tr class="hover:bg-base-300">
 						<td>{city.id}</td>
 						<td>{city.name}</td>
