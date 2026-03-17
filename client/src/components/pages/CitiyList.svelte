@@ -32,7 +32,7 @@
 
 	const computeRadius = () => {
 		const zoom = map.getZoom();
-		return Math.max(3, Math.min(12, zoom - 3));
+		return zoom < 8 ? 1 : Math.max(1, Math.min(10, 2 * zoom - 13));
 	};
 
 	const updateMarkerSizes = () => {
