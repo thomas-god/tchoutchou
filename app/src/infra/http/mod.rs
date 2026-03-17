@@ -17,7 +17,7 @@ use crate::{
     infra::{
         caches::{InMemoryDestinationsCache, InMemoryGraphCache},
         config::Config,
-        http::handlers::{autocomplete_city, get_destinations},
+        http::handlers::{autocomplete_city, get_cities, get_destinations},
         repository::{geospatial::NominatimGeospatialRepository, sqlite::SqliteRepository},
     },
 };
@@ -95,4 +95,5 @@ fn routes() -> Router<AppState> {
     Router::new()
         .route("/stations/autocomplete", get(autocomplete_city))
         .route("/destinations", get(get_destinations))
+        .route("/cities", get(get_cities))
 }

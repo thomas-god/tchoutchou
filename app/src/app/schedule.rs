@@ -151,6 +151,9 @@ pub trait ScheduleDataRepository {
 
     /// Return all cities in the system.
     fn all_cities(&self) -> Vec<City>;
+
+    /// Return all cities in the system with extra metadata (wikidata, wikipedia).
+    fn all_cities_with_extra_information(&self) -> Vec<CityWithExtraInformation>;
 }
 
 pub trait GraphCache: Send + Sync {
@@ -163,6 +166,13 @@ pub trait DestinationsCache: Send + Sync {
     fn get(&self, date: &str, origin: &CityId) -> Option<Arc<(Vec<Trip>, Vec<City>)>>;
     fn insert(&self, date: &str, origin: &CityId, result: Arc<(Vec<Trip>, Vec<City>)>);
     fn clear(&self);
+}
+
+#[derive(Debug, Clone)]
+pub struct CityWithExtraInformation {
+    pub city: City,
+    pub wikidata: Option<String>,
+    pub wikipedia: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -275,6 +285,14 @@ impl<R: ScheduleDataRepository, GC: GraphCache, DC: DestinationsCache, GR: Geosp
             .lock()
             .map_err(|_| ())
             .map(|repo| repo.all_cities())
+    }
+
+    /// Return all cities in the system with extra metadata (wikidata, wikipedia).
+    pub fn all_cities_with_extra_information(&self) -> Result<Vec<CityWithExtraInformation>, ()> {
+        self.repository
+            .lock()
+            .map_err(|_| ())
+            .map(|repo| repo.all_cities_with_extra_information())
     }
 
     pub fn find_destinations(
@@ -397,6 +415,7 @@ pub mod test_utils {
             fn search_cities_by_name(&self, query: &str, limit: usize) -> Vec<City>;
             fn cities_by_ids(&self, ids: &[CityId]) -> Vec<City>;
             fn all_cities(&self) -> Vec<City>;
+            fn all_cities_with_extra_information(&self) -> Vec<CityWithExtraInformation>;
         }
     }
 

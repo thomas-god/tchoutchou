@@ -11,8 +11,9 @@ use crate::{
         ImportedRouteId, ImportedSchedule, ImportedScheduleId, ImportedStation, ImportedStationId,
         ImportedTripLeg,
         schedule::{
-            CityImportKey, CityInformation, InternalStationId, InternalTripLeg,
-            ScheduleDataImportResult, ScheduleDataRepository, ScheduleDataToImport,
+            CityImportKey, CityInformation, CityWithExtraInformation, InternalStationId,
+            InternalTripLeg, ScheduleDataImportResult, ScheduleDataRepository,
+            ScheduleDataToImport,
         },
     },
     domain::optim::{City, CityCountry, CityId, CityName},
@@ -520,6 +521,42 @@ impl ScheduleDataRepository for SqliteRepository {
         })
         .expect("all_cities: query failed")
         .map(|r| r.expect("all_cities: row mapping failed"))
+        .collect()
+    }
+
+    fn all_cities_with_extra_information(&self) -> Vec<CityWithExtraInformation> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, country, name, lat, lon, parent, wikidata, wikipedia \
+                 FROM t_cities ORDER BY id",
+            )
+            .expect("all_cities_with_extra_information: prepare failed");
+
+        stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let country: String = row.get(1)?;
+            let name: String = row.get(2)?;
+            let lat: f64 = row.get(3)?;
+            let lon: f64 = row.get(4)?;
+            let parent: Option<i64> = row.get(5)?;
+            let wikidata: Option<String> = row.get(6)?;
+            let wikipedia: Option<String> = row.get(7)?;
+            Ok(CityWithExtraInformation {
+                city: City::new(
+                    CityId::from(id),
+                    name.into(),
+                    country.into(),
+                    lat,
+                    lon,
+                    parent.map(CityId::from),
+                ),
+                wikidata,
+                wikipedia,
+            })
+        })
+        .expect("all_cities_with_extra_information: query failed")
+        .map(|r| r.expect("all_cities_with_extra_information: row mapping failed"))
         .collect()
     }
 }

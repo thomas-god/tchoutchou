@@ -7,6 +7,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    app::schedule::CityWithExtraInformation,
     domain::optim::{City, CityId},
     infra::http::AppState,
 };
@@ -94,6 +95,54 @@ pub struct DestinationsResponse {
     destinations: Vec<DestinationResponseItem>,
     cities: Vec<CityResponseItem>,
 }
+
+// --- all cities ---
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CityWithExtraInformationResponseItem {
+    id: i64,
+    name: String,
+    country: String,
+    lat: f64,
+    lon: f64,
+    wikidata: Option<String>,
+    wikipedia: Option<String>,
+}
+
+impl From<CityWithExtraInformation> for CityWithExtraInformationResponseItem {
+    fn from(c: CityWithExtraInformation) -> Self {
+        Self {
+            id: c.city.id().as_i64(),
+            name: c.city.name().to_string(),
+            country: c.city.country().to_string(),
+            lat: c.city.lat(),
+            lon: c.city.lon(),
+            wikidata: c.wikidata,
+            wikipedia: c.wikipedia,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CitiesResponse {
+    cities: Vec<CityWithExtraInformationResponseItem>,
+}
+
+pub async fn get_cities(State(state): State<AppState>) -> Result<Json<CitiesResponse>, StatusCode> {
+    let cities = state
+        .schedule
+        .all_cities_with_extra_information()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(CitiesResponse {
+        cities: cities
+            .into_iter()
+            .map(CityWithExtraInformationResponseItem::from)
+            .collect(),
+    }))
+}
+
+// --- destinations search ---
 
 pub async fn get_destinations(
     State(state): State<AppState>,
