@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { fetchCities, type CityWithExtraInformation } from '$lib/remote/cities.remote';
 	import {
+		addLabelToCity,
 		createLabel,
 		fetchLabels,
 		removeLabelFromCity,
@@ -42,6 +43,17 @@
 		await removeLabelFromCity({ cityId, labelId });
 		cities = cities.map((c) =>
 			c.id === cityId ? { ...c, labels: c.labels.filter((l) => l.id !== labelId) } : c
+		);
+	}
+
+	async function handleAddLabel(cityId: number, labelId: number) {
+		await addLabelToCity({ cityId, labelId });
+		const label = labels.find((l) => l.id === labelId);
+		if (!label) return;
+		cities = cities.map((c) =>
+			c.id === cityId && !c.labels.some((l) => l.id === labelId)
+				? { ...c, labels: [...c.labels, label] }
+				: c
 		);
 	}
 </script>
@@ -90,6 +102,11 @@
 	{#if cities.length === 0}
 		<p class="loading loading-dots">Loading…</p>
 	{:else}
-		<CitiyList {cities} onRemoveLabel={handleRemoveLabel} />
+		<CitiyList
+			{cities}
+			onRemoveLabel={handleRemoveLabel}
+			availableLabels={labels}
+			onAddLabel={handleAddLabel}
+		/>
 	{/if}
 </div>

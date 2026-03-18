@@ -49,3 +49,20 @@ export const removeLabelFromCity = command(
 		if (!res.ok) throw new Error('Failed to remove label.');
 	}
 );
+
+const addLabelToCityParamsSchema = z.object({
+	cityId: z.number(),
+	labelId: z.number()
+});
+
+export const addLabelToCity = command(
+	addLabelToCityParamsSchema,
+	async ({ cityId, labelId }: { cityId: number; labelId: number }): Promise<void> => {
+		const url = getEnv('BACKEND_URL');
+		const res = await fetch(`${url}/api/cities/${cityId}/labels/${labelId}`, {
+			method: 'PUT'
+		});
+		if (res.status === 404) throw new Error('City or label not found.');
+		if (!res.ok) throw new Error('Failed to add label.');
+	}
+);

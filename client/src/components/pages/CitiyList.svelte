@@ -1,18 +1,34 @@
 <script lang="ts">
 	import { type CityWithExtraInformation } from '$lib/remote/cities.remote';
+	import { type Label } from '$lib/remote/labels.remote';
 	import leaflet, { CircleMarker, LayerGroup } from 'leaflet';
 
 	let {
 		cities,
-		onRemoveLabel
+		onRemoveLabel,
+		availableLabels = [],
+		onAddLabel
 	}: {
 		cities: CityWithExtraInformation[];
-		onRemoveLabel?: (cityId: number, labelId: number) => Promise<void>;
+		onRemoveLabel: (cityId: number, labelId: number) => Promise<void>;
+		availableLabels: Label[];
+		onAddLabel: (cityId: number, labelId: number) => Promise<void>;
 	} = $props();
 
 	let query = $state('');
 	let citiesError = $state(false);
-	let selectedCity: CityWithExtraInformation | undefined = $state(undefined);
+	let selectedCity: CityWithExtraInformation | null = $state(null);
+	let cityToAddLabelsTo: CityWithExtraInformation | null = $state(null);
+	let addCityLabelDialog: HTMLDialogElement;
+
+	let labelsNotAssigned = $derived.by(() => {
+		if (cityToAddLabelsTo === null) {
+			return [];
+		}
+		return availableLabels.filter(
+			(label) => !cityToAddLabelsTo!.labels.some((cityLabel) => cityLabel.id === label.id)
+		);
+	});
 
 	let filtered = $derived(
 		cities.filter((c) => fuzzyMatch(c.name, query) || fuzzyMatch(c.country, query))
@@ -85,13 +101,12 @@
 
 	// Fly to and highlight the selected city
 	$effect(() => {
-		const city = selectedCity;
-		if (!map || !city) return;
+		if (!map || !selectedCity) return;
 		if (highlightMarker) {
-			highlightMarker.setLatLng([city.lat, city.lon]);
+			highlightMarker.setLatLng([selectedCity.lat, selectedCity.lon]);
 		} else {
 			highlightMarker = leaflet
-				.circleMarker([city.lat, city.lon], {
+				.circleMarker([selectedCity.lat, selectedCity.lon], {
 					radius: 8,
 					color: '#ef4444',
 					fillColor: '#ef4444',
@@ -100,10 +115,12 @@
 				})
 				.addTo(map);
 		}
-		highlightMarker.bindPopup(city.name).openPopup();
-		map.flyTo([city.lat, city.lon], 10, { duration: 0.8 });
+		highlightMarker.bindPopup(selectedCity.name).openPopup();
+		map.flyTo([selectedCity.lat, selectedCity.lon], 10, { duration: 0.8 });
 
-		const row = tableContainer?.querySelector(`[data-city-id="${city.id}"]`) as HTMLElement | null;
+		const row = tableContainer?.querySelector(
+			`[data-city-id="${selectedCity.id}"]`
+		) as HTMLElement | null;
 		if (row && tableContainer) {
 			const containerRect = tableContainer.getBoundingClientRect();
 			const rowRect = row.getBoundingClientRect();
@@ -174,8 +191,18 @@
 										</button>
 									</div>
 								</td>
-								<td>
-									<div class="flex flex-wrap gap-1">
+								<td class="flex flex-col items-start gap-2">
+									<div class="flex flex-col items-start gap-2">
+										<button
+											class="btn btn-outline btn-xs btn-primary"
+											onclick={() => {
+												cityToAddLabelsTo = city;
+												addCityLabelDialog.show();
+											}}>+</button
+										>
+									</div>
+
+									<div class="flex flex-wrap items-center gap-1">
 										{#each city.labels as label (label.id)}
 											<span class="badge flex items-center gap-1 badge-outline badge-sm">
 												{label.name}
@@ -218,6 +245,39 @@
 			</div>
 		{/if}
 	</div>
+
+	<dialog bind:this={addCityLabelDialog} class="modal">
+		<div class="modal-box">
+			<form method="dialog">
+				<button class="btn absolute top-2 right-2 btn-circle btn-ghost btn-sm">✕</button>
+			</form>
+			{#if cityToAddLabelsTo !== undefined}
+				<h2 class="mb-4 text-xl font-bold">Add label to city</h2>
+
+				<div class="flex flex-row gap-2">
+					{#each labelsNotAssigned as label}
+						<span class="badge flex items-center gap-1 badge-outline badge-sm"
+							>{label.name}
+
+							<button
+								class="btn h-auto min-h-0 p-0 leading-none btn-ghost btn-xs"
+								title="Add label"
+								onclick={() => {
+									onAddLabel(cityToAddLabelsTo!.id, label.id);
+									labelsNotAssigned = labelsNotAssigned.filter((l) => label.id != l.id);
+								}}>+</button
+							>
+						</span>
+					{:else}
+						<p class="italic">No labels</p>
+					{/each}
+				</div>
+			{/if}
+		</div>
+		<form method="dialog" class="modal-backdrop">
+			<button>close</button>
+		</form>
+	</dialog>
 
 	<!-- Right: map -->
 	<div class="w-1/2 overflow-hidden rounded-lg" bind:this={mapElement}></div>
