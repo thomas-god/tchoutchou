@@ -10,11 +10,18 @@
 	import DestinationsMap from '../organisms/DestinationsMap.svelte';
 	import DestinationsFilters from '../organisms/DestinationsFilters.svelte';
 	import DestinationCard from '../molecules/DestinationCard.svelte';
+	import LabelList from '../molecules/LabelList.svelte';
+	import { fetchLabels, type Label } from '$lib/remote/labels.remote';
 
 	let originStation: { id: number; name: string } | undefined = $state(undefined);
 
+	let labels: Label[] = $state([]);
+	let selectedLabels: number[] = $state([]);
+	fetchLabels(undefined).then((l) => (labels = l));
+
+	$inspect(selectedLabels);
+
 	let selectedDestination: DestinationResult | undefined = $state(undefined);
-	$inspect(selectedDestination);
 
 	// Filter state
 	let filters: DestinationFilters = $state({
@@ -51,7 +58,11 @@
 		getDestinationsPromise = fetchDestinations({ from: originStation.id });
 
 		destinationsResult = await getDestinationsPromise;
-		sortedDestinations = filterAndSortDestinations(destinationsResult?.destinations ?? [], filters);
+		sortedDestinations = filterAndSortDestinations(
+			destinationsResult?.destinations ?? [],
+			filters,
+			selectedLabels
+		);
 	};
 
 	let bounds = $derived.by(() => {
@@ -76,7 +87,8 @@
 		debounceTimer = setTimeout(() => {
 			sortedDestinations = filterAndSortDestinations(
 				destinationsResult?.destinations ?? [],
-				filters
+				filters,
+				selectedLabels
 			);
 		}, 300);
 	};
@@ -132,6 +144,25 @@
 				</ul>
 			{/if}
 		</div>
+
+		{#if labels.length > 0}
+			<div class="rounded-lg bg-transparent px-1">
+				<LabelList
+					{labels}
+					bind:selected={
+						() => selectedLabels,
+						(v) => {
+							selectedLabels = v;
+							sortedDestinations = filterAndSortDestinations(
+								destinationsResult?.destinations ?? [],
+								filters,
+								selectedLabels
+							);
+						}
+					}
+				/>
+			</div>
+		{/if}
 
 		{#if selectedDestination}
 			<div class="hidden sm:block" transition:fade={{ duration: 150 }}>

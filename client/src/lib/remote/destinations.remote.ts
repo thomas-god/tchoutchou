@@ -85,7 +85,6 @@ export const fetchDestinations = query(
 		};
 
 		const cityMap = new Map(cities.map((s) => [s.id, s]));
-		console.log(cityMap.get(1));
 		const origin = cityMap.get(from) ?? null;
 
 		const results: DestinationResult[] = destinations

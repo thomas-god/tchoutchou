@@ -14,11 +14,12 @@ export interface DestinationFilters {
 }
 
 /**
- * Applies filters to destinations (duration and optional max connections)
+ * Applies filters to destinations (duration, max connections and labels)
  */
 export function filterDestinations(
 	destinations: DestinationResult[],
-	filters: DestinationFilters
+	filters: DestinationFilters,
+	selectedLabels: number[] = []
 ): DestinationResult[] {
 	return destinations.filter((d) => {
 		// Check duration filter
@@ -28,6 +29,11 @@ export function filterDestinations(
 
 		// Check max connections filter (if specified)
 		if (d.connections > filters.maxConnections) {
+			return false;
+		}
+
+		// Check label filter
+		if (selectedLabels.length > 0 && !d.city.labels.some((l) => selectedLabels.includes(l.id))) {
 			return false;
 		}
 
@@ -43,11 +49,12 @@ export function sortDestinationsByDuration(destinations: DestinationResult[]): D
 }
 
 /**
- * Filters and sorts destinations by duration and connections
+ * Filters and sorts destinations by duration, connections and labels
  */
 export function filterAndSortDestinations(
 	destinations: DestinationResult[],
-	filters: DestinationFilters
+	filters: DestinationFilters,
+	selectedLabels: number[] = []
 ): DestinationResult[] {
-	return sortDestinationsByDuration(filterDestinations(destinations, filters));
+	return sortDestinationsByDuration(filterDestinations(destinations, filters, selectedLabels));
 }

@@ -8,7 +8,12 @@ import {
 import type { DestinationResult, City } from './remote/destinations.remote';
 
 // Helper to create mock destinations
-function createDestination(id: number, duration: number, connections = 0): DestinationResult {
+function createDestination(
+	id: number,
+	duration: number,
+	connections = 0,
+	labelIds: number[] = []
+): DestinationResult {
 	const city: City = {
 		id,
 		name: `City ${id}`,
@@ -16,7 +21,7 @@ function createDestination(id: number, duration: number, connections = 0): Desti
 		lat: 48.8566 + id * 0.1,
 		lon: 2.3522 + id * 0.1,
 		parent: 2,
-		labels: []
+		labels: labelIds.map((lid) => ({ id: lid, name: `Label ${lid}` }))
 	};
 
 	return {
@@ -113,6 +118,48 @@ describe('filterDestinations', () => {
 		expect(result).toHaveLength(2);
 		expect(result[0].connections).toBe(0);
 		expect(result[1].connections).toBe(1);
+	});
+
+	it('should keep all destinations when selectedLabels is empty', () => {
+		const destinations = [
+			createDestination(1, 1000, 0, [1]),
+			createDestination(2, 2000, 0, [2]),
+			createDestination(3, 3000, 0, [])
+		];
+		const filters: DestinationFilters = { duration: { min: 0, max: 10000 }, maxConnections: 2 };
+
+		const result = filterDestinations(destinations, filters, []);
+
+		expect(result).toHaveLength(3);
+	});
+
+	it('should keep only destinations with at least one selected label', () => {
+		const destinations = [
+			createDestination(1, 1000, 0, [1, 3]),
+			createDestination(2, 2000, 0, [2]),
+			createDestination(3, 3000, 0, [])
+		];
+		const filters: DestinationFilters = { duration: { min: 0, max: 10000 }, maxConnections: 2 };
+
+		const result = filterDestinations(destinations, filters, [1]);
+
+		expect(result).toHaveLength(1);
+		expect(result[0].city.id).toBe(1);
+	});
+
+	it('should combine label filter with other filters', () => {
+		const destinations = [
+			createDestination(1, 1000, 0, [1]),
+			createDestination(2, 2000, 0, [1]),
+			createDestination(3, 5000, 0, [1])
+		];
+		const filters: DestinationFilters = { duration: { min: 0, max: 3000 }, maxConnections: 2 };
+
+		const result = filterDestinations(destinations, filters, [1]);
+
+		expect(result).toHaveLength(2);
+		expect(result[0].city.id).toBe(1);
+		expect(result[1].city.id).toBe(2);
 	});
 
 	it('should filter only direct connections when maxConnections is 0', () => {
