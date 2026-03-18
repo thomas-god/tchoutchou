@@ -445,10 +445,17 @@ impl<R: ScheduleDataRepository, GC: GraphCache, DC: DestinationsCache, GR: Geosp
         city: &CityId,
         label: &CityLabelId,
     ) -> Result<(), RemoveLabelFromCityError> {
-        self.repository
+        let res = self
+            .repository
             .lock()
             .map_err(|_| RemoveLabelFromCityError::RepositoryError)?
-            .remove_label_from_city(city, label)
+            .remove_label_from_city(city, label);
+
+        if res.is_ok() {
+            self.destinations_cache.clear();
+        }
+
+        res
     }
 
     pub fn set_city_parent(
@@ -460,10 +467,17 @@ impl<R: ScheduleDataRepository, GC: GraphCache, DC: DestinationsCache, GR: Geosp
             return Err(SetCityParentError::SameCity);
         }
 
-        self.repository
+        let res = self
+            .repository
             .lock()
             .map_err(|_| SetCityParentError::RepositoryError)?
-            .set_city_parent(city, parent)
+            .set_city_parent(city, parent);
+
+        if res.is_ok() {
+            self.destinations_cache.clear();
+        }
+
+        res
     }
 }
 
@@ -1065,6 +1079,68 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn remove_label_from_city_clears_destinations_cache() {
+        let trips = vec![InternalTripLeg::new(siid(1), siid(2), 100, 200)];
+        let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2))]);
+
+        let mut mock = MockScheduleDataRepository::new();
+        // The graph cache is NOT cleared by label changes, so these are called only once.
+        mock.expect_legs_for_date()
+            .withf(|d| d == TEST_DATE)
+            .times(1)
+            .return_const(trips);
+        mock.expect_stations_to_city()
+            .times(1)
+            .return_const(mappings);
+        // cities_by_ids must be called twice: once before the label removal (cache miss)
+        // and once after (destinations cache cleared, so another miss).
+        mock.expect_cities_by_ids().times(2).returning(|_| vec![]);
+        mock.expect_remove_label_from_city()
+            .times(1)
+            .returning(|_, _| Ok(()));
+        let geo = MockGeospatialRepository::new();
+
+        let service = make_service(mock, geo);
+
+        let _ = service.find_destinations(TEST_DATE, &cid(1));
+
+        let _ = service.remove_label_from_city(&cid(1), &CityLabelId::from(1));
+
+        // Cache was cleared — repository must be queried again.
+        let _ = service.find_destinations(TEST_DATE, &cid(1));
+    }
+
+    #[test]
+    fn remove_label_from_city_does_not_clear_destinations_cache_on_error() {
+        let trips = vec![InternalTripLeg::new(siid(1), siid(2), 100, 200)];
+        let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2))]);
+
+        let mut mock = MockScheduleDataRepository::new();
+        mock.expect_legs_for_date()
+            .withf(|d| d == TEST_DATE)
+            .times(1)
+            .return_const(trips);
+        mock.expect_stations_to_city()
+            .times(1)
+            .return_const(mappings);
+        // cities_by_ids must be called exactly once: the second find_destinations call
+        // should hit the cache since the failed removal must not have cleared it.
+        mock.expect_cities_by_ids().times(1).returning(|_| vec![]);
+        mock.expect_remove_label_from_city()
+            .times(1)
+            .returning(|_, _| Err(RemoveLabelFromCityError::CityNotFound));
+        let geo = MockGeospatialRepository::new();
+
+        let service = make_service(mock, geo);
+
+        let _ = service.find_destinations(TEST_DATE, &cid(1));
+
+        let _ = service.remove_label_from_city(&cid(9999), &CityLabelId::from(1));
+
+        let _ = service.find_destinations(TEST_DATE, &cid(1));
+    }
+
     // ---- set_city_parent ----
 
     #[test]
@@ -1091,5 +1167,67 @@ mod tests {
             service.set_city_parent(&cid(2), &Some(cid(2))),
             Err(SetCityParentError::SameCity)
         ));
+    }
+
+    #[test]
+    fn set_city_parent_clears_destinations_cache() {
+        let trips = vec![InternalTripLeg::new(siid(1), siid(2), 100, 200)];
+        let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2))]);
+
+        let mut mock = MockScheduleDataRepository::new();
+        // The graph cache is NOT cleared by parent changes, so these are called only once.
+        mock.expect_legs_for_date()
+            .withf(|d| d == TEST_DATE)
+            .times(1)
+            .return_const(trips);
+        mock.expect_stations_to_city()
+            .times(1)
+            .return_const(mappings);
+        // cities_by_ids must be called twice: once before the parent change (cache miss)
+        // and once after (destinations cache cleared, so another miss).
+        mock.expect_cities_by_ids().times(2).returning(|_| vec![]);
+        mock.expect_set_city_parent()
+            .times(1)
+            .returning(|_, _| Ok(()));
+        let geo = MockGeospatialRepository::new();
+
+        let service = make_service(mock, geo);
+
+        let _ = service.find_destinations(TEST_DATE, &cid(1));
+
+        let _ = service.set_city_parent(&cid(2), &Some(cid(1)));
+
+        // Cache was cleared — repository must be queried again.
+        let _ = service.find_destinations(TEST_DATE, &cid(1));
+    }
+
+    #[test]
+    fn set_city_parent_does_not_clear_destinations_cache_on_error() {
+        let trips = vec![InternalTripLeg::new(siid(1), siid(2), 100, 200)];
+        let mappings = HashMap::from([(siid(1), cid(1)), (siid(2), cid(2))]);
+
+        let mut mock = MockScheduleDataRepository::new();
+        mock.expect_legs_for_date()
+            .withf(|d| d == TEST_DATE)
+            .times(1)
+            .return_const(trips);
+        mock.expect_stations_to_city()
+            .times(1)
+            .return_const(mappings);
+        // cities_by_ids must be called exactly once: the second find_destinations call
+        // should hit the cache since the failed parent change must not have cleared it.
+        mock.expect_cities_by_ids().times(1).returning(|_| vec![]);
+        mock.expect_set_city_parent()
+            .times(1)
+            .returning(|_, _| Err(SetCityParentError::CityNotFound));
+        let geo = MockGeospatialRepository::new();
+
+        let service = make_service(mock, geo);
+
+        let _ = service.find_destinations(TEST_DATE, &cid(1));
+
+        let _ = service.set_city_parent(&cid(9999), &Some(cid(1)));
+
+        let _ = service.find_destinations(TEST_DATE, &cid(1));
     }
 }
