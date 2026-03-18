@@ -2,7 +2,13 @@
 	import { type CityWithExtraInformation } from '$lib/remote/cities.remote';
 	import leaflet, { CircleMarker, LayerGroup } from 'leaflet';
 
-	let { cities }: { cities: CityWithExtraInformation[] } = $props();
+	let {
+		cities,
+		onRemoveLabel
+	}: {
+		cities: CityWithExtraInformation[];
+		onRemoveLabel?: (cityId: number, labelId: number) => Promise<void>;
+	} = $props();
 
 	let query = $state('');
 	let citiesError = $state(false);
@@ -171,7 +177,16 @@
 								<td>
 									<div class="flex flex-wrap gap-1">
 										{#each city.labels as label (label.id)}
-											<span class="badge badge-outline badge-sm">{label.name}</span>
+											<span class="badge flex items-center gap-1 badge-outline badge-sm">
+												{label.name}
+												{#if onRemoveLabel}
+													<button
+														class="btn h-auto min-h-0 p-0 leading-none btn-ghost btn-xs"
+														title="Remove label"
+														onclick={() => onRemoveLabel!(city.id, label.id)}>×</button
+													>
+												{/if}
+											</span>
 										{/each}
 									</div>
 								</td>

@@ -1,6 +1,11 @@
 <script lang="ts">
-	import { fetchCities } from '$lib/remote/cities.remote';
-	import { createLabel, fetchLabels, type Label } from '$lib/remote/labels.remote';
+	import { fetchCities, type CityWithExtraInformation } from '$lib/remote/cities.remote';
+	import {
+		createLabel,
+		fetchLabels,
+		removeLabelFromCity,
+		type Label
+	} from '$lib/remote/labels.remote';
 	import CitiyList from '../../components/pages/CitiyList.svelte';
 
 	let labels: Label[] = $state([]);
@@ -8,10 +13,13 @@
 	let newLabelName = $state('');
 	let createError = $state('');
 	let creating = $state(false);
+	let cities: CityWithExtraInformation[] = $state([]);
 
 	fetchLabels(undefined)
 		.then((l) => (labels = l))
 		.catch(() => (labelsError = 'Failed to load labels.'));
+
+	fetchCities(undefined).then((c) => (cities = c));
 
 	async function handleCreate(e: SubmitEvent) {
 		e.preventDefault();
@@ -28,6 +36,13 @@
 		} finally {
 			creating = false;
 		}
+	}
+
+	async function handleRemoveLabel(cityId: number, labelId: number) {
+		await removeLabelFromCity({ cityId, labelId });
+		cities = cities.map((c) =>
+			c.id === cityId ? { ...c, labels: c.labels.filter((l) => l.id !== labelId) } : c
+		);
 	}
 </script>
 
@@ -72,11 +87,9 @@
 
 	<h1 class="px-4 pt-4 text-2xl">Cities</h1>
 
-	{#await fetchCities(undefined)}
+	{#if cities.length === 0}
 		<p class="loading loading-dots">Loading…</p>
-	{:then cities}
-		<CitiyList {cities} />
-	{:catch}
-		<p class="error status">Failed to load cities.</p>
-	{/await}
+	{:else}
+		<CitiyList {cities} onRemoveLabel={handleRemoveLabel} />
+	{/if}
 </div>
