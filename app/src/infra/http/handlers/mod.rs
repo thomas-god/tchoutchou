@@ -7,7 +7,9 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    app::schedule::{AddLabelToCityError, CityWithExtraInformation, LabelCreationError, RemoveLabelFromCityError},
+    app::schedule::{
+        AddLabelToCityError, CityWithExtraInformation, LabelCreationError, RemoveLabelFromCityError,
+    },
     domain::{City, CityId, CityLabel, CityLabelId},
     infra::http::AppState,
 };
@@ -70,12 +72,20 @@ pub struct DestinationResponseItem {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct CityLabelItem {
+    id: i64,
+    name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CityResponseItem {
     id: i64,
     name: String,
     country: String,
     lat: f64,
     lon: f64,
+    parent: Option<i64>,
+    labels: Vec<CityLabelItem>,
 }
 
 impl From<City> for CityResponseItem {
@@ -86,6 +96,15 @@ impl From<City> for CityResponseItem {
             country: city.country().to_string(),
             lat: city.lat(),
             lon: city.lon(),
+            parent: city.parent().map(|id| *id),
+            labels: city
+                .labels()
+                .iter()
+                .map(|label| CityLabelItem {
+                    id: **label.id(),
+                    name: label.name().to_string(),
+                })
+                .collect(),
         }
     }
 }
