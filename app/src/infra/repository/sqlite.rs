@@ -13,8 +13,8 @@ use crate::{
         ImportedTripLeg,
         schedule::{
             AddLabelToCityError, CityImportKey, CityInformation, CityWithExtraInformation,
-            InternalStationId, InternalTripLeg, LabelCreationError, ScheduleDataImportResult,
-            ScheduleDataRepository, ScheduleDataToImport,
+            InternalStationId, InternalTripLeg, LabelCreationError, RemoveLabelFromCityError,
+            ScheduleDataImportResult, ScheduleDataRepository, ScheduleDataToImport,
         },
     },
     domain::{
@@ -686,6 +686,30 @@ impl ScheduleDataRepository for SqliteRepository {
             .expect("add_label_to_city: prepare failed")
             .execute(params![**city, **label])
             .expect("add_label_to_city: execute failed");
+
+        Ok(())
+    }
+
+    fn remove_label_from_city(
+        &mut self,
+        city: &CityId,
+        label: &CityLabelId,
+    ) -> Result<(), RemoveLabelFromCityError> {
+        let city_exists = self
+            .conn
+            .prepare_cached("SELECT 1 FROM t_cities WHERE id = ?1")
+            .expect("remove_label_from_city: prepare city check failed")
+            .exists(params![**city])
+            .expect("remove_label_from_city: city check failed");
+        if !city_exists {
+            return Err(RemoveLabelFromCityError::CityNotFound);
+        }
+
+        self.conn
+            .prepare_cached("DELETE FROM t_city_to_label WHERE city_id = ?1 AND label_id = ?2;")
+            .expect("remove_label_from_city: prepare failed")
+            .execute(params![**city, **label])
+            .expect("remove_label_from_city: execute failed");
 
         Ok(())
     }
@@ -2016,6 +2040,59 @@ mod test_sqlite {
         let (mut repo, city_id) = repo_with_city();
         let err = repo.add_label_to_city(&city_id, &CityLabelId::from(9999));
         assert!(matches!(err, Err(AddLabelToCityError::LabelNotFound)));
+    }
+
+    // ---- remove_label_from_city ----
+
+    #[test]
+    fn remove_label_from_city_succeeds() {
+        let (mut repo, city_id) = repo_with_city();
+        let label_id = repo.create_label("Capital".into()).unwrap();
+        repo.add_label_to_city(&city_id, &label_id).unwrap();
+        assert!(repo.remove_label_from_city(&city_id, &label_id).is_ok());
+        let cities = ScheduleDataRepository::all_cities(&repo);
+        let city = cities.iter().find(|c| c.id() == &city_id).unwrap();
+        assert_eq!(*city.labels(), CityLabels::empty());
+    }
+
+    #[test]
+    fn remove_label_from_city_is_idempotent_when_label_not_assigned() {
+        let (mut repo, city_id) = repo_with_city();
+        let label_id = repo.create_label("Capital".into()).unwrap();
+        // City does not have the label — should still return Ok.
+        assert!(repo.remove_label_from_city(&city_id, &label_id).is_ok());
+    }
+
+    #[test]
+    fn remove_label_from_city_is_idempotent_for_nonexistent_label() {
+        let (mut repo, city_id) = repo_with_city();
+        // Label doesn't exist at all — also idempotent.
+        assert!(
+            repo.remove_label_from_city(&city_id, &CityLabelId::from(9999))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn remove_label_from_city_nonexistent_city_returns_error() {
+        let mut repo = make_repo();
+        let label_id = repo.create_label("Capital".into()).unwrap();
+        let err = repo.remove_label_from_city(&CityId::from(9999), &label_id);
+        assert!(matches!(err, Err(RemoveLabelFromCityError::CityNotFound)));
+    }
+
+    #[test]
+    fn remove_label_from_city_does_not_remove_other_labels() {
+        let (mut repo, city_id) = repo_with_city();
+        let label1_id = repo.create_label("Capital".into()).unwrap();
+        let label2_id = repo.create_label("Hub".into()).unwrap();
+        repo.add_label_to_city(&city_id, &label1_id).unwrap();
+        repo.add_label_to_city(&city_id, &label2_id).unwrap();
+        repo.remove_label_from_city(&city_id, &label1_id).unwrap();
+        let cities = ScheduleDataRepository::all_cities(&repo);
+        let city = cities.iter().find(|c| c.id() == &city_id).unwrap();
+        assert_eq!(city.labels().iter().count(), 1);
+        assert_eq!(city.labels().iter().next().unwrap().name(), &"Hub".into());
     }
 
     // ---- labels returned on city queries ----

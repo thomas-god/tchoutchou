@@ -142,6 +142,12 @@ pub enum AddLabelToCityError {
     RepositoryError,
 }
 
+#[derive(Debug)]
+pub enum RemoveLabelFromCityError {
+    CityNotFound,
+    RepositoryError,
+}
+
 /// Persistence contract for stations, trips and schedules.
 pub trait ScheduleDataRepository {
     /// Atomically replace all timetable data (trips, schedules, route–schedule mappings)
@@ -178,6 +184,12 @@ pub trait ScheduleDataRepository {
         city: &CityId,
         label: &CityLabelId,
     ) -> Result<(), AddLabelToCityError>;
+
+    fn remove_label_from_city(
+        &mut self,
+        city: &CityId,
+        label: &CityLabelId,
+    ) -> Result<(), RemoveLabelFromCityError>;
 }
 
 pub trait GraphCache: Send + Sync {
@@ -413,6 +425,17 @@ impl<R: ScheduleDataRepository, GC: GraphCache, DC: DestinationsCache, GR: Geosp
             .map_err(|_| AddLabelToCityError::RepositoryError)?
             .add_label_to_city(city, label)
     }
+
+    pub fn remove_label_from_city(
+        &self,
+        city: &CityId,
+        label: &CityLabelId,
+    ) -> Result<(), RemoveLabelFromCityError> {
+        self.repository
+            .lock()
+            .map_err(|_| RemoveLabelFromCityError::RepositoryError)?
+            .remove_label_from_city(city, label)
+    }
 }
 
 /// Map imported data to domain types.
@@ -468,6 +491,7 @@ pub mod test_utils {
             fn all_labels(&self) -> Vec<CityLabel>;
             fn create_label(&mut self, name: CityLabelName) -> Result<CityLabelId, LabelCreationError>;
             fn add_label_to_city(&mut self, city: &CityId, label: &CityLabelId) -> Result<(), AddLabelToCityError>;
+            fn remove_label_from_city(&mut self, city: &CityId, label: &CityLabelId) -> Result<(), RemoveLabelFromCityError>;
         }
     }
 
@@ -975,5 +999,39 @@ mod tests {
             .find_destinations(TEST_DATE, &cid(1))
             .expect("after ingest");
         assert_eq!(cities_after.len(), 1);
+    }
+
+    // ---- remove_label_from_city ----
+
+    #[test]
+    fn remove_label_from_city_delegates_to_repository() {
+        let mut mock = MockScheduleDataRepository::new();
+        mock.expect_remove_label_from_city()
+            .withf(|city, label| city == &cid(1) && label == &CityLabelId::from(42))
+            .times(1)
+            .returning(|_, _| Ok(()));
+        let geo = MockGeospatialRepository::new();
+
+        let service = make_service(mock, geo);
+        assert!(
+            service
+                .remove_label_from_city(&cid(1), &CityLabelId::from(42))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn remove_label_from_city_propagates_city_not_found() {
+        let mut mock = MockScheduleDataRepository::new();
+        mock.expect_remove_label_from_city()
+            .times(1)
+            .returning(|_, _| Err(RemoveLabelFromCityError::CityNotFound));
+        let geo = MockGeospatialRepository::new();
+
+        let service = make_service(mock, geo);
+        assert!(matches!(
+            service.remove_label_from_city(&cid(9999), &CityLabelId::from(1)),
+            Err(RemoveLabelFromCityError::CityNotFound)
+        ));
     }
 }
