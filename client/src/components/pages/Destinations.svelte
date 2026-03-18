@@ -1,70 +1,57 @@
 <script lang="ts">
-	import { displayDuration, filterAndSortDestinations, type DestinationFilters } from '$lib';
+	import { filterAndSortDestinations, type DestinationFilters } from '$lib';
 	import { fade } from 'svelte/transition';
 	import { autocompleteStation, fetchDestinations } from '$lib/remote/destinations.remote';
-	import type { DestinationResult, City } from '$lib/remote/destinations.remote';
+	import type {
+		DestinationResult,
+		City,
+		DestinationsResult
+	} from '$lib/remote/destinations.remote';
 	import DestinationsMap from '../organisms/DestinationsMap.svelte';
 	import DestinationsFilters from '../organisms/DestinationsFilters.svelte';
 	import DestinationCard from '../molecules/DestinationCard.svelte';
 
-	let stop: { id: number; name: string } | undefined = $state(undefined);
+	let originStation: { id: number; name: string } | undefined = $state(undefined);
 
-	// Station autocomplete state
-	let query = $state('');
-	let autocompleteOptions: { id: number; name: string }[] = $state([]);
-	let autocompleteTimer: any;
-
-	let result: { origin: City | null; destinations: DestinationResult[] } | undefined =
-		$state(undefined);
-	let loading = $state(false);
 	let selectedDestination: DestinationResult | undefined = $state(undefined);
-	let showResults = $state(false);
-	let filtersDialog: HTMLDialogElement;
 
 	// Filter state
 	let filters: DestinationFilters = $state({
 		duration: { min: 0, max: 24 * 3600 },
 		maxConnections: 2
 	});
+	let filtersDialog: HTMLDialogElement;
 
-	const debounce = () => {
-		stop = undefined;
+	// Origin station autocomplete state
+	let originStationQuery = $state('');
+	let autocompleteOptions: { id: number; name: string }[] = $state([]);
+	let autocompleteTimer: ReturnType<typeof setTimeout>;
+	const debounceOriginAutocomplete = () => {
 		clearTimeout(autocompleteTimer);
 		autocompleteTimer = setTimeout(async () => {
-			if (query.length >= 2) {
-				autocompleteOptions = await autocompleteStation(query);
+			if (originStationQuery.length >= 2) {
+				autocompleteOptions = await autocompleteStation(originStationQuery);
 			} else {
 				autocompleteOptions = [];
 			}
 		}, 200);
 	};
 
-	$effect(() => {
-		const currentStop = stop;
-
-		if (currentStop === undefined) {
-			result = undefined;
-			showResults = false;
+	// Fetching destinations
+	let destinationsResult: { origin: City | null; destinations: DestinationResult[] } | undefined =
+		$state(undefined);
+	let getDestinationsPromise: Promise<DestinationsResult | undefined> = $state(
+		Promise.resolve(undefined)
+	);
+	const getDestinations = async () => {
+		if (originStation === undefined) {
 			return;
 		}
+		getDestinationsPromise = fetchDestinations({ from: originStation.id });
 
-		loading = true;
-		showResults = false;
-		selectedDestination = undefined;
-		let cancelled = false;
-
-		fetchDestinations({ from: currentStop.id }).then((r) => {
-			if (!cancelled) {
-				result = r;
-				sortedDestinations = filterAndSortDestinations(result?.destinations ?? [], filters);
-				loading = false;
-			}
-		});
-
-		return () => {
-			cancelled = true;
-		};
-	});
+		destinationsResult = await getDestinationsPromise;
+		sortedDestinations = filterAndSortDestinations(destinationsResult?.destinations ?? [], filters);
+	};
 
 	let bounds = $derived.by(() => {
 		const destinations = sortedDestinations;
@@ -86,14 +73,17 @@
 	const debouncedDestinationsFilters = () => {
 		clearTimeout(debounceTimer);
 		debounceTimer = setTimeout(() => {
-			sortedDestinations = filterAndSortDestinations(result?.destinations ?? [], filters);
+			sortedDestinations = filterAndSortDestinations(
+				destinationsResult?.destinations ?? [],
+				filters
+			);
 		}, 300);
 	};
 </script>
 
 <div class="relative h-lvh w-full">
 	<DestinationsMap
-		origin={result?.origin ?? undefined}
+		origin={destinationsResult?.origin ?? undefined}
 		destinations={sortedDestinations}
 		{selectedDestination}
 		{bounds}
@@ -109,28 +99,29 @@
 				<img src="/icons/locomotive.svg" alt="Steam train locomotive" class="h-4 w-4" />
 				<input
 					type="search"
-					bind:value={query}
-					oninput={debounce}
+					bind:value={originStationQuery}
+					oninput={debounceOriginAutocomplete}
 					placeholder="Je souhaite partir de ..."
 					class="grow"
 				/>
-				{#if loading}
+				{#await getDestinationsPromise}
 					<span class="loading loading-xl self-center loading-dots"></span>
-				{/if}
+				{/await}
 				<button class="btn btn-circle btn-ghost" onclick={() => filtersDialog.showModal()}>
 					<img src="/icons/filter.svg" alt="Filter icon" class="h-4 w-4" />
 				</button>
 			</label>
-			{#if stop === undefined && autocompleteOptions.length > 0}
+			{#if autocompleteOptions.length > 0}
 				<ul class="flex flex-col items-start rounded-b-lg bg-base-100 p-2">
 					{#each autocompleteOptions as option (option.id)}
 						<li class="w-full p-0.5 hover:bg-base-300">
 							<button
 								class="w-full text-start"
-								onclick={() => {
-									stop = option;
-									query = option.name;
+								onclick={async () => {
+									originStation = option;
+									originStationQuery = option.name;
 									autocompleteOptions = [];
+									await getDestinations();
 								}}
 							>
 								{option.name}
@@ -145,7 +136,7 @@
 			<div class="hidden sm:block" transition:fade={{ duration: 150 }}>
 				<DestinationCard
 					destination={selectedDestination}
-					originName={result?.origin?.name}
+					originName={destinationsResult?.origin?.name}
 					onClose={() => (selectedDestination = undefined)}
 				/>
 			</div>
@@ -159,7 +150,7 @@
 		>
 			<DestinationCard
 				destination={selectedDestination}
-				originName={result?.origin?.name}
+				originName={destinationsResult?.origin?.name}
 				onClose={() => (selectedDestination = undefined)}
 			/>
 		</div>
