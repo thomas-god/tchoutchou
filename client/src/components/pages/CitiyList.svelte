@@ -7,12 +7,14 @@
 		cities,
 		onRemoveLabel,
 		availableLabels = [],
-		onAddLabel
+		onAddLabel,
+		onSetParent
 	}: {
 		cities: CityWithExtraInformation[];
 		onRemoveLabel: (cityId: number, labelId: number) => Promise<void>;
 		availableLabels: Label[];
 		onAddLabel: (cityId: number, labelId: number) => Promise<void>;
+		onSetParent: (cityId: number, parentId: number | null) => Promise<void>;
 	} = $props();
 
 	let query = $state('');
@@ -20,6 +22,20 @@
 	let selectedCity: CityWithExtraInformation | null = $state(null);
 	let cityToAddLabelsTo: CityWithExtraInformation | null = $state(null);
 	let addCityLabelDialog: HTMLDialogElement;
+
+	let cityToSetParentFor: CityWithExtraInformation | null = $state(null);
+	let setParentDialog: HTMLDialogElement;
+	let parentSearchQuery = $state('');
+	let settingParent = $state(false);
+	let setParentError = $state('');
+
+	let parentCandidates = $derived.by(() => {
+		if (!cityToSetParentFor) return [];
+		const q = parentSearchQuery.toLowerCase();
+		return cities.filter(
+			(c) => c.id !== cityToSetParentFor!.id && (fuzzyMatch(c.name, q) || fuzzyMatch(c.country, q))
+		);
+	});
 
 	let labelsNotAssigned = $derived.by(() => {
 		if (cityToAddLabelsTo === null) {
@@ -162,6 +178,7 @@
 							<th>Name</th>
 							<th>Country</th>
 							<th>Coordinates</th>
+							<th>Parent</th>
 							<th>Labels</th>
 							<th>Wikidata</th>
 							<th>Wikipedia</th>
@@ -190,6 +207,27 @@
 											📍
 										</button>
 									</div>
+								</td>
+								<td>
+									{#each [city.parent != null ? cities.find((c) => c.id === city.parent) : null] as parentCity}
+										<div class="flex items-center gap-1">
+											{#if parentCity}
+												<span class="text-sm">{parentCity.name}</span>
+											{:else}
+												<span class="text-sm text-base-content/40 italic">—</span>
+											{/if}
+											<button
+												class="btn btn-ghost btn-xs"
+												title="Set parent"
+												onclick={() => {
+													cityToSetParentFor = city;
+													parentSearchQuery = '';
+													setParentError = '';
+													setParentDialog.showModal();
+												}}>✎</button
+											>
+										</div>
+									{/each}
 								</td>
 								<td class="flex flex-col items-start gap-2">
 									<div class="flex flex-col items-start gap-2">
@@ -272,6 +310,88 @@
 						<p class="italic">No labels</p>
 					{/each}
 				</div>
+			{/if}
+		</div>
+		<form method="dialog" class="modal-backdrop">
+			<button>close</button>
+		</form>
+	</dialog>
+
+	<dialog bind:this={setParentDialog} class="modal">
+		<div class="modal-box flex flex-col gap-4">
+			<form method="dialog">
+				<button class="btn absolute top-2 right-2 btn-circle btn-ghost btn-sm">✕</button>
+			</form>
+			{#if cityToSetParentFor}
+				<h2 class="text-xl font-bold">Set parent for <em>{cityToSetParentFor.name}</em></h2>
+
+				{#if cityToSetParentFor.parent != null}
+					{#each [cities.find((c) => c.id === cityToSetParentFor!.parent)] as currentParent}
+						<div class="flex items-center gap-2">
+							<span class="text-sm"
+								>Current: <strong>{currentParent?.name ?? cityToSetParentFor.parent}</strong></span
+							>
+							<button
+								class="btn btn-outline btn-xs btn-error"
+								disabled={settingParent}
+								onclick={async () => {
+									settingParent = true;
+									setParentError = '';
+									try {
+										await onSetParent(cityToSetParentFor!.id, null);
+										cityToSetParentFor = { ...cityToSetParentFor!, parent: null };
+										setParentDialog.close();
+									} catch (err) {
+										setParentError = err instanceof Error ? err.message : 'Failed to clear parent.';
+									} finally {
+										settingParent = false;
+									}
+								}}>Remove parent</button
+							>
+						</div>
+					{/each}
+				{/if}
+
+				<input
+					class="input-bordered input input-sm w-full"
+					type="search"
+					placeholder="Search cities…"
+					bind:value={parentSearchQuery}
+				/>
+
+				{#if setParentError}
+					<p class="text-sm text-error">{setParentError}</p>
+				{/if}
+
+				<ul class="max-h-64 divide-y divide-base-200 overflow-y-auto">
+					{#each parentCandidates.slice(0, 50) as candidate (candidate.id)}
+						<li>
+							<button
+								class="flex w-full items-center justify-between px-2 py-1 text-left hover:bg-base-200"
+								class:font-semibold={candidate.id === cityToSetParentFor.parent}
+								disabled={settingParent}
+								onclick={async () => {
+									settingParent = true;
+									setParentError = '';
+									try {
+										await onSetParent(cityToSetParentFor!.id, candidate.id);
+										cityToSetParentFor = { ...cityToSetParentFor!, parent: candidate.id };
+										setParentDialog.close();
+									} catch (err) {
+										setParentError = err instanceof Error ? err.message : 'Failed to set parent.';
+									} finally {
+										settingParent = false;
+									}
+								}}
+							>
+								<span>{candidate.name}</span>
+								<span class="text-xs text-base-content/50">{candidate.country}</span>
+							</button>
+						</li>
+					{:else}
+						<li class="px-2 py-1 italic text-base-content/50">No matching cities</li>
+					{/each}
+				</ul>
 			{/if}
 		</div>
 		<form method="dialog" class="modal-backdrop">

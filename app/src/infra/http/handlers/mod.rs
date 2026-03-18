@@ -140,6 +140,7 @@ pub struct CityWithExtraInformationResponseItem {
     country: String,
     lat: f64,
     lon: f64,
+    parent: Option<i64>,
     wikidata: Option<String>,
     wikipedia: Option<String>,
     labels: Vec<LabelResponseItem>,
@@ -153,6 +154,7 @@ impl From<CityWithExtraInformation> for CityWithExtraInformationResponseItem {
             country: c.city.country().to_string(),
             lat: c.city.lat(),
             lon: c.city.lon(),
+            parent: c.city.parent().as_ref().map(|id| **id),
             wikidata: c.wikidata,
             wikipedia: c.wikipedia,
             labels: c

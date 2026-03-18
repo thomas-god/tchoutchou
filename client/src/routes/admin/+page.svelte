@@ -1,5 +1,9 @@
 <script lang="ts">
-	import { fetchCities, type CityWithExtraInformation } from '$lib/remote/cities.remote';
+	import {
+		fetchCities,
+		setCityParent,
+		type CityWithExtraInformation
+	} from '$lib/remote/cities.remote';
 	import {
 		addLabelToCity,
 		createLabel,
@@ -56,6 +60,11 @@
 				: c
 		);
 	}
+
+	async function handleSetParent(cityId: number, parentId: number | null) {
+		await setCityParent({ cityId, parentId });
+		cities = cities.map((c) => (c.id === cityId ? { ...c, parent: parentId } : c));
+	}
 </script>
 
 <div class="flex h-screen flex-col overflow-hidden">
@@ -107,6 +116,7 @@
 			onRemoveLabel={handleRemoveLabel}
 			availableLabels={labels}
 			onAddLabel={handleAddLabel}
+			onSetParent={handleSetParent}
 		/>
 	{/if}
 </div>
