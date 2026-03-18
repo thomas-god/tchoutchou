@@ -148,6 +148,14 @@ pub enum RemoveLabelFromCityError {
     RepositoryError,
 }
 
+#[derive(Debug)]
+pub enum SetCityParentError {
+    SameCity,
+    CityNotFound,
+    ParentCityNotFound,
+    RepositoryError,
+}
+
 /// Persistence contract for stations, trips and schedules.
 pub trait ScheduleDataRepository {
     /// Atomically replace all timetable data (trips, schedules, route–schedule mappings)
@@ -190,6 +198,12 @@ pub trait ScheduleDataRepository {
         city: &CityId,
         label: &CityLabelId,
     ) -> Result<(), RemoveLabelFromCityError>;
+
+    fn set_city_parent(
+        &self,
+        city: &CityId,
+        parent: &Option<CityId>,
+    ) -> Result<(), SetCityParentError>;
 }
 
 pub trait GraphCache: Send + Sync {
@@ -436,6 +450,21 @@ impl<R: ScheduleDataRepository, GC: GraphCache, DC: DestinationsCache, GR: Geosp
             .map_err(|_| RemoveLabelFromCityError::RepositoryError)?
             .remove_label_from_city(city, label)
     }
+
+    pub fn set_city_parent(
+        &self,
+        city: &CityId,
+        parent: &Option<CityId>,
+    ) -> Result<(), SetCityParentError> {
+        if parent.is_some_and(|p| p == *city) {
+            return Err(SetCityParentError::SameCity);
+        }
+
+        self.repository
+            .lock()
+            .map_err(|_| SetCityParentError::RepositoryError)?
+            .set_city_parent(city, parent)
+    }
 }
 
 /// Map imported data to domain types.
@@ -492,6 +521,7 @@ pub mod test_utils {
             fn create_label(&mut self, name: CityLabelName) -> Result<CityLabelId, LabelCreationError>;
             fn add_label_to_city(&mut self, city: &CityId, label: &CityLabelId) -> Result<(), AddLabelToCityError>;
             fn remove_label_from_city(&mut self, city: &CityId, label: &CityLabelId) -> Result<(), RemoveLabelFromCityError>;
+            fn set_city_parent(&self, city: &CityId, parent: &Option<CityId>) -> Result<(), SetCityParentError>;
         }
     }
 
@@ -1032,6 +1062,34 @@ mod tests {
         assert!(matches!(
             service.remove_label_from_city(&cid(9999), &CityLabelId::from(1)),
             Err(RemoveLabelFromCityError::CityNotFound)
+        ));
+    }
+
+    // ---- set_city_parent ----
+
+    #[test]
+    fn set_city_parent_ok() {
+        let mut mock = MockScheduleDataRepository::new();
+        mock.expect_set_city_parent()
+            .times(1)
+            .returning(|_, _| Ok(()));
+        let geo = MockGeospatialRepository::new();
+
+        let service = make_service(mock, geo);
+
+        assert!(service.set_city_parent(&cid(2), &Some(cid(1))).is_ok());
+    }
+
+    #[test]
+    fn set_city_parent_same_city_err() {
+        let mock = MockScheduleDataRepository::new();
+        let geo = MockGeospatialRepository::new();
+
+        let service = make_service(mock, geo);
+
+        assert!(matches!(
+            service.set_city_parent(&cid(2), &Some(cid(2))),
+            Err(SetCityParentError::SameCity)
         ));
     }
 }

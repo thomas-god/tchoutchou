@@ -713,6 +713,44 @@ impl ScheduleDataRepository for SqliteRepository {
 
         Ok(())
     }
+
+    fn set_city_parent(
+        &self,
+        city: &CityId,
+        parent: &Option<CityId>,
+    ) -> std::result::Result<(), crate::app::schedule::SetCityParentError> {
+        use crate::app::schedule::SetCityParentError;
+
+        let city_exists = self
+            .conn
+            .prepare_cached("SELECT 1 FROM t_cities WHERE id = ?1")
+            .expect("set_city_parent: prepare city check failed")
+            .exists(params![**city])
+            .expect("set_city_parent: city check failed");
+        if !city_exists {
+            return Err(SetCityParentError::CityNotFound);
+        }
+
+        if let Some(parent_id) = parent {
+            let parent_exists = self
+                .conn
+                .prepare_cached("SELECT 1 FROM t_cities WHERE id = ?1")
+                .expect("set_city_parent: prepare parent check failed")
+                .exists(params![**parent_id])
+                .expect("set_city_parent: parent check failed");
+            if !parent_exists {
+                return Err(SetCityParentError::ParentCityNotFound);
+            }
+        }
+
+        self.conn
+            .prepare_cached("UPDATE t_cities SET parent = ?1 WHERE id = ?2")
+            .expect("set_city_parent: prepare update failed")
+            .execute(params![parent.map(|p| *p), **city])
+            .expect("set_city_parent: execute failed");
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -2200,5 +2238,60 @@ mod test_sqlite {
         let cities = repo.all_cities_with_extra_information();
         let london = cities.iter().find(|c| c.city.id() != &city_id).unwrap();
         assert_eq!(*london.city.labels(), CityLabels::empty());
+    }
+
+    // ---- set_city_parent ----
+
+    #[test]
+    fn set_city_parent_returns_city_not_found_for_unknown_city() {
+        let repo = make_repo();
+        let result = repo.set_city_parent(&CityId::from(999), &None);
+        assert!(matches!(
+            result,
+            Err(crate::app::schedule::SetCityParentError::CityNotFound)
+        ));
+    }
+
+    #[test]
+    fn set_city_parent_returns_parent_city_not_found_for_unknown_parent() {
+        let repo = two_city_repo();
+        let cities = repo.all_cities();
+        let city_id = *cities[0].id();
+        let result = repo.set_city_parent(&city_id, &Some(CityId::from(999)));
+        assert!(matches!(
+            result,
+            Err(crate::app::schedule::SetCityParentError::ParentCityNotFound)
+        ));
+    }
+
+    #[test]
+    fn set_city_parent_sets_parent_correctly() {
+        let repo = two_city_repo();
+        let cities = repo.all_cities();
+        let child_id = *cities[0].id();
+        let parent_id = *cities[1].id();
+
+        repo.set_city_parent(&child_id, &Some(parent_id)).unwrap();
+
+        let updated = repo.cities_by_ids(&[child_id]);
+        assert_eq!(*updated[0].parent(), Some(parent_id));
+    }
+
+    #[test]
+    fn set_city_parent_clears_parent_when_none() {
+        let repo = two_city_repo();
+        let cities = repo.all_cities();
+        let child_id = *cities[0].id();
+        let parent_id = *cities[1].id();
+
+        // first set a parent
+        repo.set_city_parent(&child_id, &Some(parent_id)).unwrap();
+        let updated = repo.cities_by_ids(&[child_id]);
+        assert_eq!(*updated[0].parent(), Some(parent_id));
+
+        // then clear it
+        repo.set_city_parent(&child_id, &None).unwrap();
+        let updated = repo.cities_by_ids(&[child_id]);
+        assert_eq!(*updated[0].parent(), None);
     }
 }
