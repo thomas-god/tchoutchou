@@ -19,7 +19,7 @@ use crate::{
         config::Config,
         http::handlers::{
             add_label_to_city, autocomplete_city, create_label, get_cities, get_destinations,
-            get_labels,
+            get_labels, remove_label_from_city,
         },
         repository::{geospatial::NominatimGeospatialRepository, sqlite::SqliteRepository},
     },
@@ -102,6 +102,6 @@ fn routes() -> Router<AppState> {
         .route("/labels", get(get_labels).post(create_label))
         .route(
             "/cities/{city_id}/labels/{label_id}",
-            put(add_label_to_city),
+            put(add_label_to_city).delete(remove_label_from_city),
         )
 }

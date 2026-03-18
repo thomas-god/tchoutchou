@@ -7,7 +7,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    app::schedule::{AddLabelToCityError, CityWithExtraInformation, LabelCreationError},
+    app::schedule::{AddLabelToCityError, CityWithExtraInformation, LabelCreationError, RemoveLabelFromCityError},
     domain::{City, CityId, CityLabel, CityLabelId},
     infra::http::AppState,
 };
@@ -250,5 +250,19 @@ pub async fn add_label_to_city(
             Err(StatusCode::NOT_FOUND)
         }
         Err(AddLabelToCityError::RepositoryError) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+pub async fn remove_label_from_city(
+    State(state): State<AppState>,
+    Path((city_id, label_id)): Path<(i64, i64)>,
+) -> Result<StatusCode, StatusCode> {
+    match state
+        .schedule
+        .remove_label_from_city(&CityId::from(city_id), &CityLabelId::from(label_id))
+    {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(RemoveLabelFromCityError::CityNotFound) => Err(StatusCode::NOT_FOUND),
+        Err(RemoveLabelFromCityError::RepositoryError) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }
