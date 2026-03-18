@@ -14,6 +14,7 @@
 	let originStation: { id: number; name: string } | undefined = $state(undefined);
 
 	let selectedDestination: DestinationResult | undefined = $state(undefined);
+	$inspect(selectedDestination);
 
 	// Filter state
 	let filters: DestinationFilters = $state({
@@ -58,12 +59,12 @@
 		if (destinations.length === 0) return undefined;
 		return {
 			lat: {
-				min: Math.min(...destinations.map((d) => d.station.lat)),
-				max: Math.max(...destinations.map((d) => d.station.lat))
+				min: Math.min(...destinations.map((d) => d.city.lat)),
+				max: Math.max(...destinations.map((d) => d.city.lat))
 			},
 			lon: {
-				min: Math.min(...destinations.map((d) => d.station.lon)),
-				max: Math.max(...destinations.map((d) => d.station.lon))
+				min: Math.min(...destinations.map((d) => d.city.lon)),
+				max: Math.max(...destinations.map((d) => d.city.lon))
 			}
 		};
 	});

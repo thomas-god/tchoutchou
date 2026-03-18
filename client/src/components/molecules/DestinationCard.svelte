@@ -17,8 +17,8 @@
 	const activities = ['Culturel', 'Festif'];
 
 	const photos = $derived([
-		`https://picsum.photos/seed/${destination.station.id}a/400/200`,
-		`https://picsum.photos/seed/${destination.station.id}b/400/200`
+		`https://picsum.photos/seed/${destination.city.id}a/400/200`,
+		`https://picsum.photos/seed/${destination.city.id}b/400/200`
 	]);
 
 	const connectionLabel = $derived(
@@ -41,17 +41,17 @@
 	<!-- Photos -->
 	<div class="grid h-32 grid-cols-2 gap-0.5">
 		{#each photos as src, i (i)}
-			<img {src} alt="Photo de {destination.station.name}" class="h-full w-full object-cover" />
+			<img {src} alt="Photo de {destination.city.name}" class="h-full w-full object-cover" />
 		{/each}
 	</div>
 
 	<div class="card-body gap-3 p-4">
 		<!-- Title & country -->
 		<div>
-			<h2 class="card-title text-xl leading-tight">{destination.station.name}</h2>
+			<h2 class="card-title text-xl leading-tight">{destination.city.name}</h2>
 			<p class="mt-0.5 flex items-center gap-1 text-sm text-base-content/60">
 				<img src="/icons/city.svg" alt="" class="h-3.5 w-3.5 opacity-60" />
-				{destination.station.country}
+				{destination.city.country}
 			</p>
 		</div>
 
@@ -82,9 +82,15 @@
 
 		<!-- Activity tags -->
 		<div class="flex flex-wrap gap-1.5">
-			{#each activities as activity (activity)}
-				<span class="badge badge-outline badge-sm">{activity}</span>
-			{/each}
+			{#if destination.city.labels.length > 0}
+				{#each destination.city.labels as label}
+					<span class="badge badge-outline badge-sm">{label.name}</span>
+				{/each}
+			{:else}
+				{#each activities as activity (activity)}
+					<span class="badge badge-outline badge-sm">{activity}</span>
+				{/each}
+			{/if}
 		</div>
 	</div>
 </div>

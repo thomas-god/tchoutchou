@@ -14,11 +14,13 @@ function createDestination(id: number, duration: number, connections = 0): Desti
 		name: `City ${id}`,
 		country: 'FR',
 		lat: 48.8566 + id * 0.1,
-		lon: 2.3522 + id * 0.1
+		lon: 2.3522 + id * 0.1,
+		parent: 2,
+		labels: []
 	};
 
 	return {
-		station: city,
+		city: city,
 		duration,
 		connections,
 		visitedStations: [city]

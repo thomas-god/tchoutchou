@@ -16,13 +16,20 @@ const citySchema = z.object({
 	name: z.string(),
 	country: z.string(),
 	lat: z.number(),
-	lon: z.number()
+	lon: z.number(),
+	parent: z.number().optional(),
+	labels: z.array(
+		z.object({
+			id: z.number(),
+			name: z.string()
+		})
+	)
 });
 
-export type City = z.infer<typeof citySchema> ;
+export type City = z.infer<typeof citySchema>;
 
 export interface DestinationResult {
-	station: City;
+	city: City;
 	duration: number;
 	connections: number;
 	visitedStations: City[];
@@ -77,18 +84,19 @@ export const fetchDestinations = query(
 			cities: City[];
 		};
 
-		const stationMap = new Map(cities.map((s) => [s.id, s]));
-		const origin = stationMap.get(from) ?? null;
+		const cityMap = new Map(cities.map((s) => [s.id, s]));
+		console.log(cityMap.get(1));
+		const origin = cityMap.get(from) ?? null;
 
 		const results: DestinationResult[] = destinations
-			.filter((d) => stationMap.has(d.station_id))
+			.filter((d) => cityMap.has(d.station_id))
 			.map((d) => ({
-				station: stationMap.get(d.station_id)!,
+				city: cityMap.get(d.station_id)!,
 				duration: d.duration,
 				connections: d.connections,
 				visitedStations: (d.visited_station_ids ?? [])
-					.filter((id) => stationMap.has(id))
-					.map((id) => stationMap.get(id)!)
+					.filter((id) => cityMap.has(id))
+					.map((id) => cityMap.get(id)!)
 			}));
 
 		return { origin, destinations: results };
@@ -104,4 +112,3 @@ export interface DestinationsQueryParams {
 		maxDuration: number;
 	};
 }
-

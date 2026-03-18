@@ -47,7 +47,7 @@
 	let markers = $derived(
 		destinations.map((destination) => {
 			const marker = leaflet
-				.circleMarker([destination.station.lat, destination.station.lon], { radius: 3 })
+				.circleMarker([destination.city.lat, destination.city.lon], { radius: 3 })
 				.on('click', () => {
 					if (onDestinationSelect) {
 						onDestinationSelect(destination);
@@ -55,7 +55,7 @@
 				});
 
 			return {
-				id: destination.station.id,
+				id: destination.city.id,
 				marker
 			};
 		})
@@ -75,14 +75,14 @@
 		routeLayer.clearLayers();
 
 		if (selectedDestination !== undefined) {
-			const entry = markers.find((m) => m.id === selectedDestination!.station.id);
+			const entry = markers.find((m) => m.id === selectedDestination!.city.id);
 			if (entry !== undefined) {
 				// Move the marker out of the cluster so it renders individually
 				markersLayer.removeLayer(entry.marker);
 				highlightLayer.addLayer(entry.marker);
 				previouslyHighlighted = entry.marker;
 
-				map.flyTo([selectedDestination.station.lat, selectedDestination.station.lon], map.zoom, {
+				map.flyTo([selectedDestination.city.lat, selectedDestination.city.lon], map.zoom, {
 					duration: 0.6,
 					animate: true
 				});
@@ -92,7 +92,7 @@
 					const routePoints: [number, number][] = [
 						[origin.lat, origin.lon],
 						...selectedDestination.visitedStations.map((s) => [s.lat, s.lon] as [number, number]),
-						[selectedDestination.station.lat, selectedDestination.station.lon]
+						[selectedDestination.city.lat, selectedDestination.city.lon]
 					];
 
 					// Draw the main route line
