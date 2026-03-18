@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     app::schedule::{
-        AddLabelToCityError, CityWithExtraInformation, LabelCreationError, RemoveLabelFromCityError,
+        AddLabelToCityError, CityWithExtraInformation, LabelCreationError,
+        RemoveLabelFromCityError, SetCityParentError,
     },
     domain::{City, CityId, CityLabel, CityLabelId},
     infra::http::AppState,
@@ -283,5 +284,30 @@ pub async fn remove_label_from_city(
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(RemoveLabelFromCityError::CityNotFound) => Err(StatusCode::NOT_FOUND),
         Err(RemoveLabelFromCityError::RepositoryError) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+// --- set city parent ---
+
+#[derive(Deserialize)]
+pub struct SetCityParentBody {
+    parent_id: Option<i64>,
+}
+
+pub async fn set_city_parent(
+    State(state): State<AppState>,
+    Path(city_id): Path<i64>,
+    Json(body): Json<SetCityParentBody>,
+) -> Result<StatusCode, StatusCode> {
+    let parent = body.parent_id.map(CityId::from);
+    match state
+        .schedule
+        .set_city_parent(&CityId::from(city_id), &parent)
+    {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(SetCityParentError::CityNotFound) => Err(StatusCode::NOT_FOUND),
+        Err(SetCityParentError::ParentCityNotFound) => Err(StatusCode::UNPROCESSABLE_ENTITY),
+        Err(SetCityParentError::SameCity) => Err(StatusCode::UNPROCESSABLE_ENTITY),
+        Err(SetCityParentError::RepositoryError) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }
