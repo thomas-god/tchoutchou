@@ -1,7 +1,6 @@
 import { getEnv } from '$lib/env';
 import { query } from '$app/server';
 import z from 'zod';
-import type { Destination, Trip } from '$lib/server/types';
 
 // --- Shared types ---
 
@@ -20,11 +19,7 @@ const citySchema = z.object({
 	lon: z.number()
 });
 
-export type City = z.infer<typeof citySchema> & {
-	population?: number | null;
-	numberOfMuseums?: number | null;
-	zones?: Zone[];
-};
+export type City = z.infer<typeof citySchema> ;
 
 export interface DestinationResult {
 	station: City;
@@ -110,23 +105,3 @@ export interface DestinationsQueryParams {
 	};
 }
 
-function transformToDestination(result: DestinationResult): Destination {
-	const city: City = {
-		...result.station,
-		population: null,
-		numberOfMuseums: null,
-		zones: []
-	};
-
-	const trip: Trip = {
-		origin: result.visitedStations[0] || result.station,
-		destination: result.station,
-		duration: result.duration,
-		connections: result.connections,
-		visitedStations: result.visitedStations,
-		legs: [],
-		intermediaryStopNames: result.visitedStations.slice(1, -1).map((s) => s.name)
-	};
-
-	return { city, trip };
-}
