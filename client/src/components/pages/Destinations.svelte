@@ -19,8 +19,6 @@
 	let selectedLabels: number[] = $state([]);
 	fetchLabels(undefined).then((l) => (labels = l));
 
-	$inspect(selectedLabels);
-
 	let selectedDestination: DestinationResult | undefined = $state(undefined);
 
 	// Filter state
@@ -145,7 +143,7 @@
 			{/if}
 		</div>
 
-		{#if labels.length > 0}
+		{#if labels.length > 0 && destinationsResult}
 			<div class="rounded-lg bg-transparent px-1">
 				<LabelList
 					{labels}
