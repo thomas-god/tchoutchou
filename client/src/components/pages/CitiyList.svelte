@@ -50,6 +50,15 @@
 		cities.filter((c) => fuzzyMatch(c.name, query) || fuzzyMatch(c.country, query))
 	);
 
+	let cityById = $derived.by(() => {
+		const map: Map<number | null, CityWithExtraInformation> = new Map();
+		for (const city of cities) {
+			map.set(city.id, city);
+		}
+
+		return map;
+	});
+
 	function fuzzyMatch(text: string, pattern: string): boolean {
 		if (!pattern) return true;
 		const t = text.toLowerCase();
@@ -209,25 +218,23 @@
 									</div>
 								</td>
 								<td>
-									{#each [city.parent != null ? cities.find((c) => c.id === city.parent) : null] as parentCity}
-										<div class="flex items-center gap-1">
-											{#if parentCity}
-												<span class="text-sm">{parentCity.name}</span>
-											{:else}
-												<span class="text-sm text-base-content/40 italic">—</span>
-											{/if}
-											<button
-												class="btn btn-ghost btn-xs"
-												title="Set parent"
-												onclick={() => {
-													cityToSetParentFor = city;
-													parentSearchQuery = '';
-													setParentError = '';
-													setParentDialog.showModal();
-												}}>✎</button
-											>
-										</div>
-									{/each}
+									<div class="flex items-center gap-1">
+										{#if cityById.has(city.parent)}
+											{@const parentCity = cityById.get(city.parent) as CityWithExtraInformation}
+											<span class="text-sm">{parentCity.name}</span>
+										{:else}
+											<span class="text-sm text-base-content/40 italic">—</span>
+										{/if}
+										<button
+											class="btn btn-ghost btn-xs"
+											title="Set parent"
+											onclick={() => {
+												cityToSetParentFor = city;
+												setParentError = '';
+												setParentDialog.showModal();
+											}}>✎</button
+										>
+									</div>
 								</td>
 								<td class="flex flex-col items-start gap-2">
 									<div class="flex flex-col items-start gap-2">
@@ -317,39 +324,39 @@
 		</form>
 	</dialog>
 
-	<dialog bind:this={setParentDialog} class="modal">
-		<div class="modal-box flex flex-col gap-4">
-			<form method="dialog">
-				<button class="btn absolute top-2 right-2 btn-circle btn-ghost btn-sm">✕</button>
-			</form>
+	<dialog bind:this={setParentDialog} class="no-transition modal duration-[0]!">
+		<div class="no-transition modal-box flex flex-col gap-4 duration-[0]!">
+			<button
+				onclick={() => setParentDialog.close()}
+				class="btn absolute top-2 right-2 btn-circle btn-ghost btn-sm">✕</button
+			>
 			{#if cityToSetParentFor}
 				<h2 class="text-xl font-bold">Set parent for <em>{cityToSetParentFor.name}</em></h2>
 
-				{#if cityToSetParentFor.parent != null}
-					{#each [cities.find((c) => c.id === cityToSetParentFor!.parent)] as currentParent}
-						<div class="flex items-center gap-2">
-							<span class="text-sm"
-								>Current: <strong>{currentParent?.name ?? cityToSetParentFor.parent}</strong></span
-							>
-							<button
-								class="btn btn-outline btn-xs btn-error"
-								disabled={settingParent}
-								onclick={async () => {
-									settingParent = true;
-									setParentError = '';
-									try {
-										await onSetParent(cityToSetParentFor!.id, null);
-										cityToSetParentFor = { ...cityToSetParentFor!, parent: null };
-										setParentDialog.close();
-									} catch (err) {
-										setParentError = err instanceof Error ? err.message : 'Failed to clear parent.';
-									} finally {
-										settingParent = false;
-									}
-								}}>Remove parent</button
-							>
-						</div>
-					{/each}
+				{#if cityById.has(cityToSetParentFor.parent)}
+					{@const currentParent = cityById.get(cityToSetParentFor.parent)}
+					<div class="flex items-center gap-2">
+						<span class="text-sm"
+							>Current: <strong>{currentParent?.name ?? cityToSetParentFor.parent}</strong></span
+						>
+						<button
+							class="btn btn-outline btn-xs btn-error"
+							disabled={settingParent}
+							onclick={async () => {
+								settingParent = true;
+								setParentError = '';
+								try {
+									await onSetParent(cityToSetParentFor!.id, null);
+									cityToSetParentFor = { ...cityToSetParentFor!, parent: null };
+									setParentDialog.close();
+								} catch (err) {
+									setParentError = err instanceof Error ? err.message : 'Failed to clear parent.';
+								} finally {
+									settingParent = false;
+								}
+							}}>Remove parent</button
+						>
+					</div>
 				{/if}
 
 				<input
@@ -416,5 +423,11 @@
 
 	.row-highlight {
 		animation: row-flash 1.4s ease-out;
+	}
+
+	.no-transition {
+		transition: none !important;
+		transition-duration: 0ms !important;
+		animation: none !important;
 	}
 </style>
