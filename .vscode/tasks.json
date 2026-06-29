@@ -20,7 +20,7 @@
     {
       "label": "Run Client",
       "type": "shell",
-      "command": "nvm use 22 && npm run dev; fish",
+      "command": "nvm use 26 && npm run dev; fish",
       "options": {
         "cwd": "${workspaceFolder}/client"
       },
