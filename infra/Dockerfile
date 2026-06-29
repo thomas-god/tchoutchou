@@ -18,7 +18,7 @@ RUN rm app/src/main.rs
 COPY app/src app/src
 RUN touch app/src/main.rs && cargo build --release --locked --bin app
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
