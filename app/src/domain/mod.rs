@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use derive_more::{AsRef, Constructor, Deref, From, FromStr};
 
 pub mod destinations;
@@ -27,6 +28,7 @@ pub struct CityLabelName(String);
 pub struct CityLabel {
     id: CityLabelId,
     name: CityLabelName,
+    metadata: Option<CityLabelMetadata>,
 }
 
 impl CityLabel {
@@ -35,6 +37,22 @@ impl CityLabel {
     }
     pub fn name(&self) -> &CityLabelName {
         &self.name
+    }
+}
+
+#[derive(Debug, Clone, Constructor, PartialEq)]
+pub struct CityLabelMetadata {
+    source: String,
+    date: DateTime<Utc>,
+}
+
+impl CityLabelMetadata {
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub fn date(&self) -> &DateTime<Utc> {
+        &self.date
     }
 }
 

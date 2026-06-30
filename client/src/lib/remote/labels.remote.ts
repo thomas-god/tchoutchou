@@ -57,9 +57,9 @@ const addLabelToCityParamsSchema = z.object({
 
 export const addLabelToCity = command(
 	addLabelToCityParamsSchema,
-	async ({ cityId, labelId }: { cityId: number; labelId: number }): Promise<void> => {
+	async ({ cityId, labelId }: z.infer<typeof addLabelToCityParamsSchema>): Promise<void> => {
 		const url = getEnv('BACKEND_URL');
-		const res = await fetch(`${url}/api/cities/${cityId}/labels/${labelId}`, {
+		const res = await fetch(`${url}/api/cities/${cityId}/labels/${labelId}?source=admin`, {
 			method: 'PUT'
 		});
 		if (res.status === 404) throw new Error('City or label not found.');

@@ -12,7 +12,8 @@ use crate::{
         ImportedTripLeg, TrainDataToImport,
     },
     domain::{
-        City, CityCountry, CityId, CityLabel, CityLabelId, CityLabelName, CityName,
+        City, CityCountry, CityId, CityLabel, CityLabelId, CityLabelMetadata, CityLabelName,
+        CityName,
         destinations::{DestinationFilters, Graph, Trip, TripLeg, find_trips},
     },
 };
@@ -191,6 +192,7 @@ pub trait ScheduleDataRepository {
         &mut self,
         city: &CityId,
         label: &CityLabelId,
+        metadata: &CityLabelMetadata,
     ) -> Result<(), AddLabelToCityError>;
 
     fn remove_label_from_city(
@@ -433,11 +435,12 @@ impl<R: ScheduleDataRepository, GC: GraphCache, DC: DestinationsCache, GR: Geosp
         &self,
         city: &CityId,
         label: &CityLabelId,
+        metadata: &CityLabelMetadata,
     ) -> Result<(), AddLabelToCityError> {
         self.repository
             .lock()
             .map_err(|_| AddLabelToCityError::RepositoryError)?
-            .add_label_to_city(city, label)
+            .add_label_to_city(city, label, metadata)
     }
 
     pub fn remove_label_from_city(
@@ -533,7 +536,7 @@ pub mod test_utils {
             fn all_cities_with_extra_information(&self) -> Vec<CityWithExtraInformation>;
             fn all_labels(&self) -> Vec<CityLabel>;
             fn create_label(&mut self, name: CityLabelName) -> Result<CityLabelId, LabelCreationError>;
-            fn add_label_to_city(&mut self, city: &CityId, label: &CityLabelId) -> Result<(), AddLabelToCityError>;
+            fn add_label_to_city(&mut self, city: &CityId, label: &CityLabelId, metadata: &CityLabelMetadata) -> Result<(), AddLabelToCityError>;
             fn remove_label_from_city(&mut self, city: &CityId, label: &CityLabelId) -> Result<(), RemoveLabelFromCityError>;
             fn set_city_parent(&self, city: &CityId, parent: &Option<CityId>) -> Result<(), SetCityParentError>;
         }

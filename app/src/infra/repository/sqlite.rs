@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use chrono::{DateTime, Utc};
 use derive_more::From;
 use rusqlite::{
     Connection, Result, ToSql, Transaction, params,
@@ -18,7 +19,8 @@ use crate::{
         },
     },
     domain::{
-        City, CityCountry, CityId, CityLabel, CityLabelId, CityLabelName, CityLabels, CityName,
+        City, CityCountry, CityId, CityLabel, CityLabelId, CityLabelMetadata, CityLabelName,
+        CityLabels, CityName,
     },
 };
 
@@ -67,7 +69,18 @@ impl SqliteRepository {
             .filter_map(|v| {
                 let id = v["id"].as_i64()?;
                 let name = v["name"].as_str()?;
-                Some(CityLabel::new(CityLabelId::from(id), name.into()))
+                let metadata = match (
+                    v["source"].as_str(),
+                    v["date"]
+                        .as_str()
+                        .and_then(|d| DateTime::parse_from_rfc3339(d).map(|d| d.to_utc()).ok()),
+                ) {
+                    (Some(source), Some(date)) => {
+                        Some(CityLabelMetadata::new(source.to_owned(), date))
+                    }
+                    _ => None,
+                };
+                Some(CityLabel::new(CityLabelId::from(id), name.into(), metadata))
             })
             .collect();
         CityLabels::new(labels)
@@ -122,8 +135,9 @@ impl SqliteRepository {
             CREATE TABLE IF NOT EXISTS t_city_to_label (
                 city_id     INTEGER REFERENCES t_cities(id) ON DELETE CASCADE,
                 label_id    INTEGER REFERENCES t_city_labels(id) ON DELETE CASCADE,
+                source      TEXT,
+                added_at    TEXT,
                 PRIMARY KEY (city_id, label_id)
-
             );
 
             CREATE VIEW IF NOT EXISTS v_cities_with_labels AS
@@ -137,7 +151,7 @@ impl SqliteRepository {
                     wikidata,
                     wikipedia,
                     json_group_array(
-                        json_object('id', t_city_labels.id, 'name', t_city_labels.name)
+                        json_object('id', t_city_labels.id, 'name', t_city_labels.name, 'source', t_city_to_label.source, 'date', t_city_to_label.added_at)
                     ) FILTER (WHERE t_city_labels.id IS NOT NULL) AS labels
                 FROM t_cities
                 LEFT JOIN t_city_to_label ON t_cities.id = t_city_to_label.city_id
@@ -629,7 +643,11 @@ impl ScheduleDataRepository for SqliteRepository {
         stmt.query_map([], |row| {
             let id: i64 = row.get(0)?;
             let name: String = row.get(1)?;
-            Ok(CityLabel::new(CityLabelId::from(id), name.into()))
+            let metadata = match (row.get::<_, String>(2), row.get::<_, DateTime<Utc>>(3)) {
+                (Ok(source), Ok(date)) => Some(CityLabelMetadata::new(source, date)),
+                _ => None,
+            };
+            Ok(CityLabel::new(CityLabelId::from(id), name.into(), metadata))
         })
         .expect("all_labels: query failed")
         .map(|r| r.expect("all_labels: row mapping failed"))
@@ -658,6 +676,7 @@ impl ScheduleDataRepository for SqliteRepository {
         &mut self,
         city: &CityId,
         label: &CityLabelId,
+        metadata: &CityLabelMetadata,
     ) -> Result<(), AddLabelToCityError> {
         let city_exists = self
             .conn
@@ -681,10 +700,11 @@ impl ScheduleDataRepository for SqliteRepository {
 
         self.conn
             .prepare_cached(
-                "INSERT OR IGNORE INTO t_city_to_label (city_id, label_id) VALUES (?1, ?2);",
+                "INSERT OR REPLACE INTO t_city_to_label (city_id, label_id, source, added_at)
+                VALUES (?1, ?2, ?3, ?4);",
             )
             .expect("add_label_to_city: prepare failed")
-            .execute(params![**city, **label])
+            .execute(params![**city, **label, metadata.source(), metadata.date()])
             .expect("add_label_to_city: execute failed");
 
         Ok(())
@@ -847,7 +867,12 @@ impl SqliteRepository {
 
 #[cfg(test)]
 mod test_sqlite {
-    use crate::app::{TrainDataToImport, schedule::CityInformation};
+    use chrono::DateTime;
+
+    use crate::{
+        app::{TrainDataToImport, schedule::CityInformation},
+        domain::CityLabelMetadata,
+    };
 
     use super::*;
 
@@ -2050,33 +2075,92 @@ mod test_sqlite {
         (repo, city_id)
     }
 
+    fn base_metadata() -> CityLabelMetadata {
+        CityLabelMetadata::new(
+            "source".to_string(),
+            DateTime::parse_from_rfc3339("2001-09-09 01:46:40Z")
+                .unwrap()
+                .to_utc(),
+        )
+    }
+
     #[test]
     fn add_label_to_city_succeeds() {
         let (mut repo, city_id) = repo_with_city();
         let label_id = repo.create_label("Capital".into()).unwrap();
-        assert!(repo.add_label_to_city(&city_id, &label_id).is_ok());
+        assert!(
+            repo.add_label_to_city(&city_id, &label_id, &base_metadata())
+                .is_ok()
+        );
     }
 
     #[test]
     fn add_label_to_city_is_idempotent() {
         let (mut repo, city_id) = repo_with_city();
         let label_id = repo.create_label("Capital".into()).unwrap();
-        repo.add_label_to_city(&city_id, &label_id).unwrap();
-        assert!(repo.add_label_to_city(&city_id, &label_id).is_ok());
+        repo.add_label_to_city(&city_id, &label_id, &base_metadata())
+            .unwrap();
+        assert!(
+            repo.add_label_to_city(&city_id, &label_id, &base_metadata())
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn add_label_to_city_updates_existing_source_and_date() {
+        let (mut repo, city_id) = repo_with_city();
+
+        let label_id = repo.create_label("Capital".into()).unwrap();
+        let metadata = CityLabelMetadata::new(
+            "source".to_string(),
+            DateTime::parse_from_rfc3339("2001-09-09 01:46:40Z")
+                .unwrap()
+                .to_utc(),
+        );
+        repo.add_label_to_city(&city_id, &label_id, &metadata)
+            .unwrap();
+
+        let metadata = CityLabelMetadata::new(
+            "source2".to_string(),
+            DateTime::parse_from_rfc3339("2010-09-09 01:46:40Z")
+                .unwrap()
+                .to_utc(),
+        );
+
+        assert!(
+            repo.add_label_to_city(&city_id, &label_id, &metadata)
+                .is_ok()
+        );
+
+        let (source, date) = repo
+            .conn
+            .query_row("select source, added_at from t_city_to_label;", [], |row| {
+                let source: String = row.get(0)?;
+                let date: DateTime<Utc> = row.get(1)?;
+                Ok((source, date))
+            })
+            .unwrap();
+        assert_eq!(source, "source2".to_string());
+        assert_eq!(
+            date,
+            DateTime::parse_from_rfc3339("2010-09-09 01:46:40Z")
+                .unwrap()
+                .to_utc()
+        );
     }
 
     #[test]
     fn add_label_to_city_nonexistent_city_returns_error() {
         let mut repo = make_repo();
         let label_id = repo.create_label("Capital".into()).unwrap();
-        let err = repo.add_label_to_city(&CityId::from(9999), &label_id);
+        let err = repo.add_label_to_city(&CityId::from(9999), &label_id, &base_metadata());
         assert!(matches!(err, Err(AddLabelToCityError::CityNotFound)));
     }
 
     #[test]
     fn add_label_to_city_nonexistent_label_returns_error() {
         let (mut repo, city_id) = repo_with_city();
-        let err = repo.add_label_to_city(&city_id, &CityLabelId::from(9999));
+        let err = repo.add_label_to_city(&city_id, &CityLabelId::from(9999), &base_metadata());
         assert!(matches!(err, Err(AddLabelToCityError::LabelNotFound)));
     }
 
@@ -2086,7 +2170,8 @@ mod test_sqlite {
     fn remove_label_from_city_succeeds() {
         let (mut repo, city_id) = repo_with_city();
         let label_id = repo.create_label("Capital".into()).unwrap();
-        repo.add_label_to_city(&city_id, &label_id).unwrap();
+        repo.add_label_to_city(&city_id, &label_id, &base_metadata())
+            .unwrap();
         assert!(repo.remove_label_from_city(&city_id, &label_id).is_ok());
         let cities = ScheduleDataRepository::all_cities(&repo);
         let city = cities.iter().find(|c| c.id() == &city_id).unwrap();
@@ -2124,8 +2209,10 @@ mod test_sqlite {
         let (mut repo, city_id) = repo_with_city();
         let label1_id = repo.create_label("Capital".into()).unwrap();
         let label2_id = repo.create_label("Hub".into()).unwrap();
-        repo.add_label_to_city(&city_id, &label1_id).unwrap();
-        repo.add_label_to_city(&city_id, &label2_id).unwrap();
+        repo.add_label_to_city(&city_id, &label1_id, &base_metadata())
+            .unwrap();
+        repo.add_label_to_city(&city_id, &label2_id, &base_metadata())
+            .unwrap();
         repo.remove_label_from_city(&city_id, &label1_id).unwrap();
         let cities = ScheduleDataRepository::all_cities(&repo);
         let city = cities.iter().find(|c| c.id() == &city_id).unwrap();
@@ -2144,7 +2231,9 @@ mod test_sqlite {
             .unwrap()
             .id();
         let label_id = repo.create_label("Capital".into()).unwrap();
-        repo.add_label_to_city(&city_id, &label_id).unwrap();
+
+        repo.add_label_to_city(&city_id, &label_id, &base_metadata())
+            .unwrap();
         (repo, city_id, label_id)
     }
 
@@ -2155,7 +2244,11 @@ mod test_sqlite {
         let paris = cities.iter().find(|c| c.id() == &city_id).unwrap();
         assert_eq!(
             *paris.labels(),
-            CityLabels::new(vec![CityLabel::new(label_id, "Capital".into())])
+            CityLabels::new(vec![CityLabel::new(
+                label_id,
+                "Capital".into(),
+                Some(base_metadata())
+            )])
         );
     }
 
@@ -2171,7 +2264,8 @@ mod test_sqlite {
     fn all_cities_city_with_multiple_labels_returns_all() {
         let (mut repo, city_id, _) = repo_with_labelled_paris();
         let label2_id = repo.create_label("Hub".into()).unwrap();
-        repo.add_label_to_city(&city_id, &label2_id).unwrap();
+        repo.add_label_to_city(&city_id, &label2_id, &base_metadata())
+            .unwrap();
 
         let cities = ScheduleDataRepository::all_cities(&repo);
         let paris = cities.iter().find(|c| c.id() == &city_id).unwrap();
@@ -2188,7 +2282,11 @@ mod test_sqlite {
         assert_eq!(results.len(), 1);
         assert_eq!(
             *results[0].labels(),
-            CityLabels::new(vec![CityLabel::new(label_id, "Capital".into())])
+            CityLabels::new(vec![CityLabel::new(
+                label_id,
+                "Capital".into(),
+                Some(base_metadata())
+            ),])
         );
     }
 
@@ -2207,7 +2305,11 @@ mod test_sqlite {
         assert_eq!(cities.len(), 1);
         assert_eq!(
             *cities[0].labels(),
-            CityLabels::new(vec![CityLabel::new(label_id, "Capital".into())])
+            CityLabels::new(vec![CityLabel::new(
+                label_id,
+                "Capital".into(),
+                Some(base_metadata())
+            )])
         );
     }
 
@@ -2228,7 +2330,11 @@ mod test_sqlite {
         let paris = cities.iter().find(|c| c.city.id() == &city_id).unwrap();
         assert_eq!(
             *paris.city.labels(),
-            CityLabels::new(vec![CityLabel::new(label_id, "Capital".into())])
+            CityLabels::new(vec![CityLabel::new(
+                label_id,
+                "Capital".into(),
+                Some(base_metadata())
+            )])
         );
     }
 

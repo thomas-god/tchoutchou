@@ -11,7 +11,7 @@ use crate::{
         AddLabelToCityError, CityWithExtraInformation, LabelCreationError,
         RemoveLabelFromCityError, SetCityParentError,
     },
-    domain::{City, CityId, CityLabel, CityLabelId},
+    domain::{City, CityId, CityLabel, CityLabelId, CityLabelMetadata},
     infra::http::AppState,
 };
 
@@ -259,14 +259,22 @@ pub async fn get_labels(State(state): State<AppState>) -> Result<Json<LabelsResp
     }))
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct AddLabelToCityQuery {
+    source: String,
+}
+
 pub async fn add_label_to_city(
     State(state): State<AppState>,
     Path((city_id, label_id)): Path<(i64, i64)>,
+    Query(query): Query<AddLabelToCityQuery>,
 ) -> Result<StatusCode, StatusCode> {
-    match state
-        .schedule
-        .add_label_to_city(&CityId::from(city_id), &CityLabelId::from(label_id))
-    {
+    let metadata = CityLabelMetadata::new(query.source, Utc::now());
+    match state.schedule.add_label_to_city(
+        &CityId::from(city_id),
+        &CityLabelId::from(label_id),
+        &metadata,
+    ) {
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(AddLabelToCityError::CityNotFound) | Err(AddLabelToCityError::LabelNotFound) => {
             Err(StatusCode::NOT_FOUND)
